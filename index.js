@@ -252,10 +252,10 @@ discord.on("messageCreate", async (message) => {
     
     try {
       // Create a simple lancer image URL (you can replace this with your own image)
-      const lancerImageUrl = "https://imgur.com/a/kZvXA1P"; // Replace with actual image URL
+      const lancerImageUrl = "https://lh6.googleusercontent.com/2Ily2mjA9308eeQ9o_FjvFde8npF8fM5rb4eXwAM77TNCvODsVUYGY5pFP9FQ5rU2m2yX3EXdWkaLeAuUJf_sSA"; // Replace with actual image URL
       
       const embed = new EmbedBuilder()
-        .setTitle("LANCER STATUS CHECK (AKA THE GOAT)")
+        .setTitle("is bouncy little pumpkin aliv?")
         .setDescription("**Lancer Status: ALIVE**")
         .setColor(0x00ff00)
         .setImage(lancerImageUrl)
