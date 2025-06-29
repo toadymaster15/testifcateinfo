@@ -106,7 +106,7 @@ class MusicQueue {
     this.connection = null;
     this.textChannel = null;
     this.retryCount = 0;
-    this.maxRetries = 3;
+    this.maxRetries = 2; // Reduced retries to prevent spam
   }
 
   addSong(song) {
@@ -137,72 +137,138 @@ const musicQueues = new Map();
 
 let ytdlAgent = null;
 
-// Enhanced agent creation with better error handling
+// Enhanced agent creation with better error handling and rotation
 function createYTDLAgent() {
   try {
-    if (!process.env.YOUTUBE_COOKIES) {
-      console.log('⚠️ No YouTube cookies found, using basic agent');
-      return ytdl.createAgent();
-    }
-
-    console.log('🍪 Creating agent with cookies...');
+    console.log('🔧 Creating enhanced YTDL agent...');
     
-    let cookies;
-    try {
-      cookies = JSON.parse(process.env.YOUTUBE_COOKIES);
-      console.log(`✅ Parsed ${cookies.length} cookies from JSON format`);
-    } catch (parseError) {
-      console.log('🔄 JSON parsing failed, trying cookie header format...');
-      const cookieHeader = process.env.YOUTUBE_COOKIES;
-      cookies = cookieHeader.split('; ').map(cookie => {
-        const [name, value] = cookie.split('=');
-        return {
-          name: name.trim(),
-          value: value ? value.trim() : '',
-          domain: '.youtube.com'
-        };
-      });
+    // Enhanced user agents that mimic real browsers
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    ];
+
+    const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+
+    // Enhanced cookie parsing
+    if (process.env.YOUTUBE_COOKIES) {
+      let cookies;
+      try {
+        // Try parsing as JSON first
+        cookies = JSON.parse(process.env.YOUTUBE_COOKIES);
+        console.log(`✅ Parsed ${cookies.length} cookies from JSON format`);
+      } catch (parseError) {
+        console.log('🔄 JSON parsing failed, trying cookie header format...');
+        const cookieHeader = process.env.YOUTUBE_COOKIES.trim();
+        cookies = cookieHeader.split(';').map(cookie => {
+          const [name, ...valueParts] = cookie.split('=');
+          const value = valueParts.join('=');
+          return {
+            name: name.trim(),
+            value: value ? value.trim() : '',
+            domain: '.youtube.com',
+            path: '/',
+            httpOnly: true,
+            secure: true
+          };
+        }).filter(cookie => cookie.name && cookie.value);
+        
+        console.log(`✅ Parsed ${cookies.length} cookies from header format`);
+      }
+
+      if (cookies && cookies.length > 0) {
+        const agent = ytdl.createAgent(cookies, {
+          headers: {
+            'User-Agent': randomUserAgent,
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+          }
+        });
+        console.log('✅ Agent created with cookies and enhanced headers');
+        return agent;
+      }
     }
 
-    const agent = ytdl.createAgent(cookies);
-    console.log('✅ Agent created successfully with cookies');
+    // Fallback agent without cookies but with enhanced headers
+    console.log('🔄 Creating fallback agent without cookies...');
+    const agent = ytdl.createAgent([], {
+      headers: {
+        'User-Agent': randomUserAgent,
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+      }
+    });
+    
+    console.log('✅ Fallback agent created');
     return agent;
 
   } catch (error) {
-    console.error('❌ Error creating agent with cookies:', error.message);
-    console.log('🔄 Using fallback basic agent');
+    console.error('❌ Error creating enhanced agent:', error.message);
+    console.log('🔄 Using basic agent as last resort');
     
     try {
       return ytdl.createAgent();
     } catch (fallbackError) {
-      console.error('❌ Failed to create fallback agent:', fallbackError.message);
+      console.error('❌ Failed to create any agent:', fallbackError.message);
       return null;
     }
   }
 }
 
-// Initialize agent at startup
+// Initialize agent at startup with better testing
 async function initializeYTDLAgent() {
+  console.log('🚀 Initializing YTDL agent...');
   ytdlAgent = createYTDLAgent();
   
   if (ytdlAgent) {
     try {
-      const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-      const info = await ytdl.getInfo(testUrl, { agent: ytdlAgent });
-      console.log('✅ Agent test successful:', info.videoDetails.title);
+      // Use a more reliable test video
+      const testUrls = [
+        'https://www.youtube.com/watch?v=jNQXAC9IVRw', // Short test video
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ'  // Rick Roll
+      ];
+      
+      for (const testUrl of testUrls) {
+        try {
+          console.log(`🧪 Testing agent with: ${testUrl}`);
+          const info = await ytdl.getInfo(testUrl, { 
+            agent: ytdlAgent,
+            requestOptions: {
+              timeout: 10000 // 10 second timeout
+            }
+          });
+          
+          if (info && info.videoDetails) {
+            console.log('✅ Agent test successful:', info.videoDetails.title);
+            return;
+          }
+        } catch (testError) {
+          console.log(`⚠️ Test failed for ${testUrl}:`, testError.message);
+          continue;
+        }
+      }
+      
+      console.log('⚠️ All agent tests failed, but agent is available');
     } catch (testError) {
       console.log('⚠️ Agent test failed:', testError.message);
     }
+  } else {
+    console.log('❌ No agent available');
   }
 }
 
-// Enhanced video info function with multiple fallback strategies
+// Enhanced video info function with aggressive fallback strategies
 async function getVideoInfo(query) {
   try {
     console.log(`🔍 Searching for: ${query}`);
     
     if (!ytdl.validateURL(query)) {
-      console.log('🔍 Searching YouTube...');
+      console.log('🔍 Searching YouTube with yt-search...');
       const searchResults = await ytSearch(query);
       
       if (!searchResults.videos || searchResults.videos.length === 0) {
@@ -211,6 +277,13 @@ async function getVideoInfo(query) {
       }
 
       const video = searchResults.videos[0];
+      
+      // Validate the found URL
+      if (!ytdl.validateURL(video.url)) {
+        console.log('❌ Search returned invalid YouTube URL');
+        return null;
+      }
+
       return {
         title: video.title,
         url: video.url,
@@ -220,43 +293,64 @@ async function getVideoInfo(query) {
     } else {
       console.log('📺 Processing YouTube URL...');
       
-      // Multiple strategies for getting video info
+      // Multiple aggressive strategies for getting video info
       const strategies = [
-        // Strategy 1: Use agent with cookies
+        // Strategy 1: Use agent with enhanced options
         async () => {
           if (!ytdlAgent) throw new Error('No agent available');
-          return await ytdl.getInfo(query, { agent: ytdlAgent });
-        },
-        
-        // Strategy 2: Basic request with custom headers
-        async () => {
-          return await ytdl.getInfo(query, {
+          return await ytdl.getInfo(query, { 
+            agent: ytdlAgent,
             requestOptions: {
+              timeout: 15000,
               headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9'
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cache-Control': 'no-cache'
               }
             }
           });
         },
         
-        // Strategy 3: Basic request
+        // Strategy 2: Basic request with custom headers and timeout
         async () => {
-          return await ytdl.getInfo(query);
+          return await ytdl.getInfo(query, {
+            requestOptions: {
+              timeout: 12000,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+              }
+            }
+          });
         },
         
-        // Strategy 4: Search fallback
+        // Strategy 3: Minimal request
         async () => {
+          return await ytdl.getInfo(query, {
+            requestOptions: {
+              timeout: 8000
+            }
+          });
+        },
+        
+        // Strategy 4: Search fallback using video ID
+        async () => {
+          console.log('🔄 Using search fallback for video info...');
           const videoIdMatch = query.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
           if (!videoIdMatch) throw new Error('Cannot extract video ID');
           
           const videoId = videoIdMatch[1];
+          
+          // Search by video ID to get basic info
           const searchResults = await ytSearch(videoId);
           if (!searchResults.videos || searchResults.videos.length === 0) {
             throw new Error('No search results for video ID');
           }
           
-          const video = searchResults.videos[0];
+          const video = searchResults.videos.find(v => v.videoId === videoId) || searchResults.videos[0];
+          
           return {
             videoDetails: {
               title: video.title,
@@ -269,26 +363,28 @@ async function getVideoInfo(query) {
       
       for (let i = 0; i < strategies.length; i++) {
         try {
-          console.log(`🔄 Trying strategy ${i + 1}/${strategies.length}...`);
+          console.log(`🔄 Trying video info strategy ${i + 1}/${strategies.length}...`);
           const info = await strategies[i]();
           
-          console.log('✅ Successfully got video info');
-          return {
-            title: info.videoDetails.title,
-            url: query,
-            duration: parseInt(info.videoDetails.lengthSeconds),
-            thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
-          };
+          if (info && info.videoDetails) {
+            console.log('✅ Successfully got video info');
+            return {
+              title: info.videoDetails.title,
+              url: query,
+              duration: parseInt(info.videoDetails.lengthSeconds) || 0,
+              thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
+            };
+          }
         } catch (err) {
-          console.log(`❌ Strategy ${i + 1} failed:`, err.message);
+          console.log(`❌ Video info strategy ${i + 1} failed:`, err.message);
           
           if (i < strategies.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 1500));
           }
         }
       }
       
-      throw new Error('All strategies failed to get video info');
+      throw new Error('All video info strategies failed');
     }
   } catch (error) {
     console.error('❌ Error getting video info:', error.message);
@@ -296,17 +392,20 @@ async function getVideoInfo(query) {
   }
 }
 
-// Enhanced audio stream creation with multiple format attempts
+// Enhanced audio stream creation with more aggressive strategies
 async function createAudioStream(url) {
-  console.log('🎵 Creating audio stream...');
+  console.log('🎵 Creating audio stream with enhanced strategies...');
   
-  // Strategy 1: Try with agent and high quality
   const strategies = [
+    // Strategy 1: High quality with agent
     async () => {
       const options = {
         filter: 'audioonly',
         quality: 'highestaudio',
-        highWaterMark: 1024 * 1024
+        highWaterMark: 1024 * 512, // Reduced buffer
+        requestOptions: {
+          timeout: 15000
+        }
       };
       
       if (ytdlAgent) {
@@ -316,12 +415,18 @@ async function createAudioStream(url) {
       return ytdl(url, options);
     },
     
-    // Strategy 2: Try with agent and lower quality
+    // Strategy 2: Medium quality with agent
     async () => {
       const options = {
         filter: 'audioonly',
         quality: 'lowestaudio',
-        highWaterMark: 1024 * 512
+        highWaterMark: 1024 * 256,
+        requestOptions: {
+          timeout: 12000,
+          headers: {
+            'Range': 'bytes=0-'
+          }
+        }
       };
       
       if (ytdlAgent) {
@@ -331,18 +436,32 @@ async function createAudioStream(url) {
       return ytdl(url, options);
     },
     
-    // Strategy 3: Try without agent
+    // Strategy 3: Without agent, basic options
     async () => {
       return ytdl(url, {
         filter: 'audioonly',
-        quality: 'lowestaudio'
+        quality: 'lowestaudio',
+        requestOptions: {
+          timeout: 10000
+        }
       });
     },
     
-    // Strategy 4: Try with different format
+    // Strategy 4: Any audio format
     async () => {
       return ytdl(url, {
-        filter: format => format.container === 'mp4' && format.hasAudio,
+        filter: format => format.hasAudio,
+        quality: 'lowest',
+        requestOptions: {
+          timeout: 8000
+        }
+      });
+    },
+    
+    // Strategy 5: Specific format targeting
+    async () => {
+      return ytdl(url, {
+        filter: format => format.container === 'webm' && format.hasAudio,
         quality: 'lowest'
       });
     }
@@ -353,23 +472,29 @@ async function createAudioStream(url) {
       console.log(`🔄 Trying audio stream strategy ${i + 1}/${strategies.length}...`);
       const stream = await strategies[i]();
       
-      if (stream) {
+      if (stream && typeof stream.pipe === 'function') {
         console.log('✅ Audio stream created successfully');
+        
+        // Add stream error handling
+        stream.on('error', (err) => {
+          console.error('❌ Stream error during playback:', err.message);
+        });
+        
         return stream;
       }
     } catch (err) {
       console.log(`❌ Audio stream strategy ${i + 1} failed:`, err.message);
       
       if (i < strategies.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
   }
   
-  throw new Error('All audio stream strategies failed');
+  throw new Error('All audio stream strategies failed - YouTube might be blocking requests');
 }
 
-// Enhanced playMusic function with better error handling and retries
+// Enhanced playMusic function with better error handling
 async function playMusic(guildId) {
   const queue = musicQueues.get(guildId);
   if (!queue || queue.isEmpty()) {
@@ -399,8 +524,11 @@ async function playMusic(guildId) {
     stream.on('error', (streamError) => {
       console.error('❌ Stream error:', streamError.message);
       
-      // Retry logic
-      if (queue.retryCount < queue.maxRetries) {
+      // More selective retry logic
+      if (queue.retryCount < queue.maxRetries && 
+          !streamError.message.includes('Sign in to confirm') &&
+          !streamError.message.includes('Video unavailable')) {
+        
         queue.retryCount++;
         console.log(`🔄 Retrying... (${queue.retryCount}/${queue.maxRetries})`);
         
@@ -409,26 +537,32 @@ async function playMusic(guildId) {
         }
         
         setTimeout(() => {
-          // Put the song back at the front of the queue
           queue.songs.unshift(song);
           playMusic(guildId);
-        }, 2000);
+        }, 3000);
       } else {
-        console.error('❌ Max retries reached, skipping song');
+        console.error('❌ Max retries reached or permanent error, skipping song');
         queue.retryCount = 0;
         
         if (queue.textChannel) {
-          queue.textChannel.send(`❌ Failed to play after ${queue.maxRetries} attempts, skipping...`).catch(console.error);
+          let errorMsg = `❌ Failed to play: **${song.title}**`;
+          if (streamError.message.includes('Sign in to confirm')) {
+            errorMsg += ' - YouTube authentication required';
+          } else if (streamError.message.includes('Video unavailable')) {
+            errorMsg += ' - Video is unavailable';
+          }
+          queue.textChannel.send(errorMsg).catch(console.error);
         }
         
-        setTimeout(() => playMusic(guildId), 1000);
+        setTimeout(() => playMusic(guildId), 2000);
       }
     });
 
     // Create audio resource with enhanced options
     const resource = createAudioResource(stream, {
       inputType: 'arbitrary',
-      inlineVolume: true
+      inlineVolume: true,
+      silencePaddingFrames: 0 // Reduce silence padding
     });
 
     if (resource.volume) {
@@ -440,7 +574,7 @@ async function playMusic(guildId) {
     
     queue.player.once(AudioPlayerStatus.Idle, () => {
       console.log('🎵 Song finished');
-      queue.retryCount = 0; // Reset retry count on successful completion
+      queue.retryCount = 0;
       setTimeout(() => playMusic(guildId), 1000);
     });
 
@@ -484,20 +618,22 @@ async function playMusic(guildId) {
       let errorMessage = `❌ Failed to play: **${song.title}**`;
       
       if (error.message.includes('Sign in to confirm')) {
-        errorMessage += ' - YouTube requires sign-in';
+        errorMessage += ' - YouTube requires sign-in. Try a different song.';
       } else if (error.message.includes('Video unavailable')) {
-        errorMessage += ' - Video is unavailable';
+        errorMessage += ' - Video is unavailable or private.';
       } else if (error.message.includes('formats')) {
-        errorMessage += ' - No playable audio formats available';
+        errorMessage += ' - No playable audio formats available. YouTube may be blocking requests.';
+      } else if (error.message.includes('timeout')) {
+        errorMessage += ' - Request timed out. YouTube servers may be overloaded.';
       } else {
-        errorMessage += ` - ${error.message}`;
+        errorMessage += ' - Please try again or use a different song.';
       }
       
       queue.textChannel.send(errorMessage).catch(console.error);
     }
     
     // Try next song after error
-    setTimeout(() => playMusic(guildId), 2000);
+    setTimeout(() => playMusic(guildId), 3000);
   }
 }
 
@@ -513,7 +649,7 @@ async function initializeBot() {
     // Initialize YTDL agent with cookies
     await initializeYTDLAgent();
     
-    await pingWebhook(`🚀 TestificateInfo bot started with enhanced audio support at ${new Date().toISOString()}`);
+    await pingWebhook(`🚀 TestificateInfo bot started with enhanced YouTube support at ${new Date().toISOString()}`);
 
     // Ping every 5 minutes
     setInterval(() => {
@@ -570,7 +706,7 @@ discord.on('messageCreate', async (message) => {
     }
   }
 
-  const cooldownTime = message.content.startsWith('t!play') ? 3000 : 1000;
+  const cooldownTime = message.content.startsWith('t!play') ? 5000 : 1000; // Increased cooldown
   commandCooldowns.set(commandKey, now + cooldownTime);
   setTimeout(() => commandCooldowns.delete(commandKey), cooldownTime);
 
