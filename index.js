@@ -212,7 +212,7 @@ discord.once("ready", async () => {
         }],
         status: 'online'
       });
-      await discord.user.setAbout('latest news from APG!!!!!\nif i ever go offline and you need me, call testificate man on this website: https://testifcateinfo.onrender.com/');
+     
       
       console.log("🎯 Initial bot status set successfully");
       
