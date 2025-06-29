@@ -1,10 +1,10 @@
 require('dotenv').config();
 const { Client: ExarotonClient } = require('exaroton');
-const { Client: DiscordClient, GatewayIntentBits, VoiceChannel } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
+const { Client: DiscordClient, GatewayIntentBits } = require('discord.js');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
+const ytdl = require('ytdl-core');
+const ytSearch = require('yt-search');
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 // Use dynamic import for node-fetch instead of require
 let fetch;
 
@@ -72,38 +72,140 @@ async function pingWebhook(message) {
   }
 }
 
-// Text-to-Speech function using Google TTS API (free)
-async function generateTTS(text, filename) {
-  try {
-    if (!fetch) {
-      const { default: nodeFetch } = await import('node-fetch');
-      fetch = nodeFetch;
-    }
+// Music queue system
+const musicQueues = new Map();
 
-    // Using Google Translate TTS (free, no API key needed)
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(text)}`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
+class MusicQueue {
+  constructor() {
+    this.songs = [];
+    this.isPlaying = false;
+    this.currentSong = null;
+    this.player = null;
+    this.connection = null;
+  }
 
-    if (!response.ok) {
-      throw new Error(`TTS API error: ${response.status}`);
-    }
+  addSong(song) {
+    this.songs.push(song);
+  }
 
-    const buffer = await response.buffer();
-    fs.writeFileSync(filename, buffer);
-    return true;
-  } catch (error) {
-    console.error('❌ TTS generation failed:', error);
-    return false;
+  getNextSong() {
+    return this.songs.shift();
+  }
+
+  clear() {
+    this.songs = [];
+    this.currentSong = null;
+  }
+
+  isEmpty() {
+    return this.songs.length === 0;
   }
 }
 
-// Voice connection storage
-const voiceConnections = new Map();
+// Get video info from YouTube
+async function getVideoInfo(query) {
+  try {
+    // Check if it's a YouTube URL
+    if (ytdl.validateURL(query)) {
+      const info = await ytdl.getInfo(query);
+      return {
+        title: info.videoDetails.title,
+        url: query,
+        duration: info.videoDetails.lengthSeconds,
+        thumbnail: info.videoDetails.thumbnails[0]?.url
+      };
+    } else {
+      // Search for the video
+      const searchResults = await ytSearch(query);
+      if (searchResults.videos.length === 0) {
+        return null;
+      }
+
+      const video = searchResults.videos[0];
+      return {
+        title: video.title,
+        url: video.url,
+        duration: video.duration.seconds,
+        thumbnail: video.thumbnail
+      };
+    }
+  } catch (error) {
+    console.error('❌ Error getting video info:', error);
+    return null;
+  }
+}
+
+// Play music function
+async function playMusic(guildId, textChannel) {
+  const queue = musicQueues.get(guildId);
+  if (!queue || queue.isEmpty()) {
+    queue.isPlaying = false;
+    return;
+  }
+
+  const song = queue.getNextSong();
+  if (!song) return;
+
+  queue.currentSong = song;
+  queue.isPlaying = true;
+
+  try {
+    console.log(`🎵 Playing: ${song.title}`);
+    
+    // Create audio stream
+    const stream = ytdl(song.url, {
+      filter: 'audioonly',
+      quality: 'lowestaudio',
+      highWaterMark: 1024 * 1024 * 10 // 10MB buffer
+    });
+
+    const resource = createAudioResource(stream, {
+      inputType: 'webm/opus'
+    });
+
+    if (!queue.player) {
+      queue.player = createAudioPlayer();
+    }
+
+    queue.player.play(resource);
+
+    if (queue.connection) {
+      queue.connection.subscribe(queue.player);
+    }
+
+    // Send now playing message
+    const nowPlayingEmbed = {
+      color: 0x00ff00,
+      title: '🎵 Now Playing',
+      description: `**${song.title}**`,
+      thumbnail: {
+        url: song.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg'
+      },
+      footer: {
+        text: `Duration: ${Math.floor(song.duration / 60)}:${(song.duration % 60).toString().padStart(2, '0')}`
+      }
+    };
+
+    textChannel.send({ embeds: [nowPlayingEmbed] });
+
+    // Handle player events
+    queue.player.on(AudioPlayerStatus.Idle, () => {
+      console.log('🎵 Song finished, playing next...');
+      playMusic(guildId, textChannel);
+    });
+
+    queue.player.on('error', (error) => {
+      console.error('❌ Audio player error:', error);
+      textChannel.send('❌ Error playing audio. Skipping to next song...');
+      playMusic(guildId, textChannel);
+    });
+
+  } catch (error) {
+    console.error('❌ Error playing music:', error);
+    textChannel.send(`❌ Error playing **${song.title}**. Skipping to next song...`);
+    playMusic(guildId, textChannel);
+  }
+}
 
 // Initialize fetch and start the bot
 async function initializeBot() {
@@ -129,7 +231,7 @@ const discord = new DiscordClient({
     GatewayIntentBits.Guilds, 
     GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates // Added for voice functionality
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
@@ -191,20 +293,10 @@ discord.on('messageCreate', async (message) => {
           console.log('🔍 Attempting to fetch server logs...');
           const logs = await server.getLogs();
 
-          console.log('📝 Server logs received');
-          console.log('📊 Logs structure:', {
-            hasContent: !!logs,
-            contentType: typeof logs,
-            contentLength: logs ? logs.length : 0
-          });
-
           if (!logs || logs.length === 0) {
             console.log('⚠️ No server logs available');
             return message.reply('⚠️ No server logs available. The server might not be generating logs or may need to be restarted.');
           }
-
-          console.log('🔍 Recent log content (last 500 chars):');
-          console.log(logs.slice(-500));
 
           const timeMatch = logs.match(/\[.*?\] \[.*?\]: The time is (\d+)/);
 
@@ -213,66 +305,36 @@ discord.on('messageCreate', async (message) => {
             console.log(`✅ Found day: ${day}`);
             message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
           } else {
-            console.log('⚠️ No "The time is" found in logs');
-
             const broadTimeMatch = logs.match(/The time is (\d+)/);
             if (broadTimeMatch) {
               const day = broadTimeMatch[1];
               console.log(`✅ Found day with broad search: ${day}`);
               message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
             } else {
-              const recentLogs = logs.split('\n').slice(-10).join('\n');
-              console.log('⚠️ Recent log lines:', recentLogs);
               message.reply('⚠️ Could not find "The time is" in server logs. The command may not have executed or the server may be too busy. Try again in a moment.');
             }
           }
         } catch (logsErr) {
-          console.error('❌ Detailed logs error:', {
-            message: logsErr.message,
-            stack: logsErr.stack,
-            name: logsErr.name
-          });
-
-          if (logsErr.message.includes('403')) {
-            message.reply('❌ Permission denied when accessing logs. Check if your API token has log access permissions.');
-          } else if (logsErr.message.includes('404')) {
-            message.reply('❌ Server logs not found. The server might not have any logs yet.');
-          } else if (logsErr.message.includes('loading') || logsErr.message.includes('stopping') || logsErr.message.includes('saving')) {
-            message.reply('⚠️ Cannot access logs while server is loading, stopping, or saving. Try again when the server is fully online.');
-          } else {
-            message.reply(`❌ Error retrieving server logs: ${logsErr.message}`);
-          }
+          console.error('❌ Detailed logs error:', logsErr.message);
+          message.reply(`❌ Error retrieving server logs: ${logsErr.message}`);
         }
       }, 5000);
 
     } catch (err) {
       console.error('❌ Error with server operation:', err.message);
-
-      if (err.message.includes('404')) {
-        message.reply('❌ Server not found. Please check the server ID configuration.');
-      } else if (err.message.includes('403')) {
-        message.reply('❌ Access denied. Please check the API token permissions.');
-      } else if (err.message.includes('401')) {
-        message.reply('❌ Authentication failed. Please check the API token.');
-      } else {
-        message.reply('❌ Failed to retrieve server information. Please try again later.');
-      }
+      message.reply('❌ Failed to retrieve server information. Please try again later.');
     }
   }
 
-  // NEW VOICE COMMANDS
-  
-  // Join voice channel command
-  if (message.content === 't!join') {
-    console.log('🎤 Join voice command received');
+  // MUSIC COMMANDS
 
-    // Check if user is in a voice channel
+  // Join voice channel
+  if (message.content === 't!join') {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
       return message.reply('❌ You need to be in a voice channel first!');
     }
 
-    // Check if bot has permissions
     if (!voiceChannel.permissionsFor(discord.user).has(['Connect', 'Speak'])) {
       return message.reply('❌ I need permission to connect and speak in that voice channel!');
     }
@@ -284,16 +346,25 @@ discord.on('messageCreate', async (message) => {
         adapterCreator: message.guild.voiceAdapterCreator,
       });
 
-      voiceConnections.set(message.guild.id, connection);
+      // Initialize music queue for this guild
+      if (!musicQueues.has(message.guild.id)) {
+        musicQueues.set(message.guild.id, new MusicQueue());
+      }
+
+      const queue = musicQueues.get(message.guild.id);
+      queue.connection = connection;
 
       connection.on(VoiceConnectionStatus.Ready, () => {
         console.log('✅ Voice connection ready');
-        message.reply(`✅ Joined **${voiceChannel.name}**!`);
+        message.reply(`✅ Joined **${voiceChannel.name}**! Use \`t!play <song>\` to play music!`);
       });
 
       connection.on(VoiceConnectionStatus.Disconnected, () => {
         console.log('❌ Voice connection disconnected');
-        voiceConnections.delete(message.guild.id);
+        if (queue) {
+          queue.clear();
+          queue.isPlaying = false;
+        }
       });
 
     } catch (error) {
@@ -302,86 +373,162 @@ discord.on('messageCreate', async (message) => {
     }
   }
 
-  // Leave voice channel command
+  // Leave voice channel
   if (message.content === 't!leave') {
-    console.log('👋 Leave voice command received');
-
-    const connection = voiceConnections.get(message.guild.id);
+    const connection = getVoiceConnection(message.guild.id);
     if (!connection) {
       return message.reply('❌ I\'m not in a voice channel!');
     }
 
     try {
       connection.destroy();
-      voiceConnections.delete(message.guild.id);
-      message.reply('✅ Left the voice channel!');
+      
+      // Clean up music queue
+      if (musicQueues.has(message.guild.id)) {
+        const queue = musicQueues.get(message.guild.id);
+        queue.clear();
+        queue.isPlaying = false;
+        musicQueues.delete(message.guild.id);
+      }
+
+      message.reply('✅ Left the voice channel and cleared the music queue!');
     } catch (error) {
       console.error('❌ Error leaving voice channel:', error);
       message.reply('❌ Failed to leave voice channel.');
     }
   }
 
-  // Speak command
-  if (message.content.startsWith('t!say ')) {
-    console.log('🗣️ Say command received');
-
-    const connection = voiceConnections.get(message.guild.id);
+  // Play music
+  if (message.content.startsWith('t!play ')) {
+    const connection = getVoiceConnection(message.guild.id);
     if (!connection) {
       return message.reply('❌ I need to be in a voice channel first! Use `t!join` to make me join your channel.');
     }
 
-    const textToSay = message.content.slice(6); // Remove 't!say '
-    if (!textToSay.trim()) {
-      return message.reply('❌ Please provide text to say! Example: `t!say Hello everyone!`');
+    const query = message.content.slice(7).trim(); // Remove 't!play '
+    if (!query) {
+      return message.reply('❌ Please provide a song name or YouTube URL!\nExample: `t!play Low Taper Gang`');
     }
 
-    // Limit text length
-    if (textToSay.length > 200) {
-      return message.reply('❌ Text is too long! Please keep it under 200 characters.');
-    }
+    message.reply('🔍 Searching for music...');
 
     try {
-      const filename = path.join(__dirname, `tts_${Date.now()}.mp3`);
-      
-      message.reply('🔄 Generating speech...');
-      
-      const success = await generateTTS(textToSay, filename);
-      if (!success) {
-        return message.reply('❌ Failed to generate speech. Please try again.');
+      const videoInfo = await getVideoInfo(query);
+      if (!videoInfo) {
+        return message.reply('❌ No music found for that search. Try a different query.');
       }
 
-      const resource = createAudioResource(filename);
-      const player = createAudioPlayer();
+      // Check video duration (limit to 10 minutes to prevent abuse)
+      if (videoInfo.duration > 600) {
+        return message.reply('❌ Song is too long! Please choose a song under 10 minutes.');
+      }
 
-      player.play(resource);
-      connection.subscribe(player);
+      // Get or create music queue
+      if (!musicQueues.has(message.guild.id)) {
+        musicQueues.set(message.guild.id, new MusicQueue());
+      }
 
-      player.on(AudioPlayerStatus.Playing, () => {
-        console.log('🎵 Audio playing');
-        message.channel.send('🗣️ Speaking...');
-      });
+      const queue = musicQueues.get(message.guild.id);
+      queue.connection = connection;
+      queue.addSong(videoInfo);
 
-      player.on(AudioPlayerStatus.Idle, () => {
-        console.log('🎵 Audio finished');
-        // Clean up the file after playing
-        fs.unlink(filename, (err) => {
-          if (err) console.error('Failed to delete TTS file:', err);
-        });
-      });
+      const addedEmbed = {
+        color: 0x0099ff,
+        title: '✅ Added to Queue',
+        description: `**${videoInfo.title}**`,
+        thumbnail: {
+          url: videoInfo.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg'
+        },
+        fields: [
+          {
+            name: 'Position in Queue',
+            value: `${queue.songs.length}`,
+            inline: true
+          },
+          {
+            name: 'Duration',
+            value: `${Math.floor(videoInfo.duration / 60)}:${(videoInfo.duration % 60).toString().padStart(2, '0')}`,
+            inline: true
+          }
+        ]
+      };
 
-      player.on('error', (error) => {
-        console.error('❌ Audio player error:', error);
-        message.reply('❌ Error playing audio.');
-        // Clean up the file on error
-        fs.unlink(filename, (err) => {
-          if (err) console.error('Failed to delete TTS file:', err);
-        });
-      });
+      message.reply({ embeds: [addedEmbed] });
+
+      // Start playing if not already playing
+      if (!queue.isPlaying) {
+        playMusic(message.guild.id, message.channel);
+      }
 
     } catch (error) {
-      console.error('❌ Error with TTS:', error);
-      message.reply('❌ Failed to generate or play speech. Please try again.');
+      console.error('❌ Error playing music:', error);
+      message.reply('❌ Failed to play music. Please try again or use a different song.');
     }
+  }
+
+  // Skip current song
+  if (message.content === 't!skip') {
+    const queue = musicQueues.get(message.guild.id);
+    if (!queue || !queue.isPlaying) {
+      return message.reply('❌ No music is currently playing!');
+    }
+
+    if (queue.player) {
+      queue.player.stop();
+      message.reply('⏭️ Skipped current song!');
+    }
+  }
+
+  // Stop music and clear queue
+  if (message.content === 't!stop') {
+    const queue = musicQueues.get(message.guild.id);
+    if (!queue || !queue.isPlaying) {
+      return message.reply('❌ No music is currently playing!');
+    }
+
+    queue.clear();
+    queue.isPlaying = false;
+    if (queue.player) {
+      queue.player.stop();
+    }
+
+    message.reply('⏹️ Stopped music and cleared the queue!');
+  }
+
+  // Show current queue
+  if (message.content === 't!queue') {
+    const queue = musicQueues.get(message.guild.id);
+    if (!queue || (queue.isEmpty() && !queue.currentSong)) {
+      return message.reply('❌ The music queue is empty!');
+    }
+
+    let queueText = '';
+    
+    if (queue.currentSong) {
+      queueText += `**Now Playing:**\n🎵 ${queue.currentSong.title}\n\n`;
+    }
+
+    if (!queue.isEmpty()) {
+      queueText += `**Up Next:**\n`;
+      queue.songs.slice(0, 10).forEach((song, index) => {
+        queueText += `${index + 1}. ${song.title}\n`;
+      });
+
+      if (queue.songs.length > 10) {
+        queueText += `... and ${queue.songs.length - 10} more songs`;
+      }
+    }
+
+    const queueEmbed = {
+      color: 0x9932cc,
+      title: '🎵 Music Queue',
+      description: queueText || 'Queue is empty',
+      footer: {
+        text: `Total songs in queue: ${queue.songs.length}`
+      }
+    };
+
+    message.reply({ embeds: [queueEmbed] });
   }
 
   // Help command
@@ -393,12 +540,12 @@ discord.on('messageCreate', async (message) => {
       fields: [
         {
           name: '🕐 Server Commands',
-          value: '`t!time` - Get current day on APG server',
+          value: '`t!time` - Dzień na APG',
           inline: false
         },
         {
-          name: '🎤 Voice Commands',
-          value: '`t!join` - Join your voice channel\n`t!leave` - Leave voice channel\n`t!say <text>` - Make me speak text (max 200 chars)',
+          name: '🎵 Music Commands',
+          value: '`t!join` - Join your voice channel\n`t!leave` - Leave voice channel\n`t!play <song>` - Play music from YouTube\n`t!skip` - Skip current song\n`t!stop` - Stop music and clear queue\n`t!queue` - Show current music queue',
           inline: false
         },
         {
@@ -408,7 +555,7 @@ discord.on('messageCreate', async (message) => {
         }
       ],
       footer: {
-        text: 'TestificateInfo Bot • Use commands in any text channel'
+        text: 'TestificateInfo Bot • You can use song names or YouTube URLs with t!play'
       }
     };
 
