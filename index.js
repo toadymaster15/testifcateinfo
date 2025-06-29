@@ -281,6 +281,8 @@ discord.on("messageCreate", async (message) => {
       .addFields(
         { name: "t!time", value: "get the current day on APG", inline: false },
         { name: "t!lancerstatus", value: "check up on lancer", inline: false },
+        { name: "t!ask", value: "ask a yes or no question", inline: false },
+        { name: "@TESTIFICATE MAN IS THIS TRUE?????", value: "simulate the feeling of being a chronically online twitter user", inline: false },
         { name: "t!help", value: "show dis mesage", inline: false }
       )
       .setTimestamp()
@@ -288,6 +290,93 @@ discord.on("messageCreate", async (message) => {
 
     message.reply({ embeds: [embed] });
   }
+  
+const getEmoji = (name) => client.application.emojis.cache.find(e => e.name === name);
+  
+  if (message.mentions.users.has(discord.user.id) && 
+    message.content.toLowerCase().includes("is this true")) {
+  
+  console.log("📊 Fact check request received");
+  
+  // Fact check responses with different categories
+  const factCheckResponses = {
+    confirmed: [
+      "✅ **TRUE** - this has been verified by multiple enterprises on APG.",
+      "✅ **CONFIRMED** - according to big justice, this is confirmed.",
+      "✅ **VERIFIED** - verified information!!!",
+      "✅ **FACTUAL** - 100% of villagers confirm this is a fact.",
+      "✅ **ACCURATE** - Testificate Man™ himself approves.",
+      "✅ **LEGITIMATE** - the apg testificate court approves of this."
+    ],
+    
+    denied: [
+      "❌ **FALSE** - this contradicts established dr trayaurus kknowledge.",
+      "❌ **DEBUNKED** - yes this is DEBUNKED its FAKE do not belive this.",
+      "❌ **MISINFORMATION** - with the APG TM data that we have, this is misinformation.",
+      "❌ **INACCURATE** - multiplie sources dispute this claim.",
+      "❌ **FABRICATED** - no credible TESTIFICAT sources support this.",
+      "❌ **DISPUTED** - with the evidenc that we hav, this is very false."
+    ],
+    
+    uncertain: [
+      '${getEmoji('boat')} **UNVERIFIED** - insuficient data on this topic so probly idk',
+      '${getEmoji('boat')} **UNCLEAR** - we don know',
+      '${getEmoji('boat')} **INCONCLUSIVE** - more investigation is needed by testificate exeperts',
+     '${getEmoji('boat')} **MIXED** - some sourcs say that it corect, some NOT.',
+      '${getEmoji('boat')} **UNDER REVIEW** - currently under review becauz um we dont pay our workers and they ned time to fact check but probly no',
+      '${getEmoji('boat')} **PARTIALLY TRUE** - idk bro i think it true beased on my SOURCES'
+    ],
+    
+    sassy: [
+      "😡 **OBVIOUSLY FALSE** - least obvius RAGE BIAT!!!! MODS BAN HIM!!!! tis so obivous bro it false",
+      '😡 **shut up** - fuck off use yur BRAIN',
+      '${getEmoji('sybau')} **CLEARLY WRONG** -90% of interviewed say that this info is FAKE',
+    ],
+    
+    meme: [
+      "low taper fade is stil masvive"
+    ]
+  };
+  
+  // Weighted random selection (similar to your ask command style)
+  function getFactCheckResponse() {
+    const rand = Math.random() * 100;
+    
+    if (rand < 30) {
+      // 30% chance - confirmed/denied (split evenly)
+      const isConfirmed = Math.random() < 0.5;
+      const category = isConfirmed ? 'confirmed' : 'denied';
+      return factCheckResponses[category][Math.floor(Math.random() * factCheckResponses[category].length)];
+    } else if (rand < 60) {
+      // 30% chance - uncertain
+      return factCheckResponses.uncertain[Math.floor(Math.random() * factCheckResponses.uncertain.length)];
+    } else if (rand < 85) {
+      // 25% chance - sassy
+      return factCheckResponses.sassy[Math.floor(Math.random() * factCheckResponses.sassy.length)];
+    } else {
+      // 15% chance - meme response
+      return factCheckResponses.meme[Math.floor(Math.random() * factCheckResponses.meme.length)];
+    }
+  }
+  
+  // Get random response
+  const response = getFactCheckResponse();
+  
+  // Footer options
+  const footers = [
+    "— Testificate Info™ Fact Checking Technology",
+    "— Verified by VIP Enterprises",
+    "APG Testificate Court - i aproves",
+  ];
+  
+  const randomFooter = footers[Math.floor(Math.random() * footers.length)];
+  
+  console.log("Fact check: Random response selected");
+  
+  // Send simple message with footer
+  message.reply(`${response}\n\n*${randomFooter}*`);
+}
+  
 if (message.content.startsWith("t!ask ")) {
     const question = message.content.slice(6).trim(); // Remove "t!ask " prefix
     
