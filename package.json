@@ -13,6 +13,7 @@
   "dependencies": {
     "@types/node": "^22.13.11",
     "discord.js": "^14.21.0",
+    "@discordjs/voice": "^0.16.1",
     "dotenv": "^16.6.0",
     "exaroton": "^1.11.3",
     "express": "^5.1.0",
