@@ -14,7 +14,7 @@
     "@types/node": "^22.13.11",
     "discord.js": "^14.21.0",
     "@discordjs/voice": "^0.16.1",
-    "@distube/ytdl-core": "^4.13.5",
+    "@distube/ytdl-core": "^4.14.4",
     "yt-search": "^2.10.4",
     "dotenv": "^16.6.0",
     "exaroton": "^1.11.3",
