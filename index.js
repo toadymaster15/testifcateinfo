@@ -138,28 +138,45 @@ async function getVideoInfo(query) {
       // For direct URLs, try to get info with multiple fallbacks
       console.log('📺 Processing YouTube URL...');
       
-      // Try with different user agents and options
+      // Enhanced user agents that work better with YouTube
       const agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0'
       ];
       
-      for (const agent of agents) {
+      for (let i = 0; i < agents.length; i++) {
+        const agent = agents[i];
         try {
+          console.log(`🔄 Trying method ${i + 1}/${agents.length} with agent: ${agent.substring(0, 50)}...`);
+          
+          const headers = {
+            'User-Agent': agent,
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
+            'Upgrade-Insecure-Requests': '1'
+          };
+
+          // Add cookies if available
+          if (process.env.YOUTUBE_COOKIES) {
+            headers['Cookie'] = process.env.YOUTUBE_COOKIES;
+            console.log('🍪 Using cookies for authentication');
+          }
+
           const info = await ytdl.getInfo(query, {
             requestOptions: {
-              headers: {
-                'User-Agent': agent,
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-              }
+              headers: headers,
+              timeout: 30000
             }
           });
           
+          console.log('✅ Successfully got video info with cookies/agent');
           return {
             title: info.videoDetails.title,
             url: query,
@@ -167,8 +184,12 @@ async function getVideoInfo(query) {
             thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
           };
         } catch (err) {
-          console.log(`❌ Failed with agent: ${agent.substring(0, 50)}...`);
-          continue;
+          console.log(`❌ Failed with method ${i + 1}: ${err.message}`);
+          
+          // If this is the last attempt, wait a bit before trying next method
+          if (i < agents.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
       }
       
@@ -176,7 +197,7 @@ async function getVideoInfo(query) {
       const videoIdMatch = query.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
       if (videoIdMatch) {
         const videoId = videoIdMatch[1];
-        console.log(`🆔 Extracted video ID: ${videoId}, searching instead...`);
+        console.log(`🆔 All direct methods failed. Extracted video ID: ${videoId}, searching instead...`);
         
         // Search for the video by ID (this often works when direct access fails)
         const searchResults = await ytSearch(videoId);
@@ -191,14 +212,13 @@ async function getVideoInfo(query) {
         }
       }
       
-      throw new Error('All methods failed');
+      throw new Error('All methods failed to get video info');
     }
   } catch (error) {
     console.error('❌ Error getting video info:', error.message);
     return null;
   }
 }
-
 // FIXED: Much cleaner playMusic function
 async function playMusic(guildId) {
   const queue = musicQueues.get(guildId);
@@ -220,30 +240,39 @@ async function playMusic(guildId) {
     console.log(`🎵 Now playing: ${song.title}`);
     
     // FIXED: Anti-bot detection ytdl stream options
-    const stream = ytdl(song.url, {
-      filter: 'audioonly',
-      quality: 'lowestaudio',
-      highWaterMark: 1024 * 512,
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': '*/*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'cross-site',
-          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"'
-        },
-        timeout: 30000
-      },
-      // Additional anti-detection options
-      begin: 0,
-      lang: 'en'
-    });
+    const ytdlOptions = {
+  filter: 'audioonly',
+  quality: 'lowestaudio',
+  highWaterMark: 1024 * 512,
+  requestOptions: {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'cross-site',
+      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Upgrade-Insecure-Requests': '1',
+      // Add referer to look more legitimate
+      'Referer': 'https://www.youtube.com/',
+      'Origin': 'https://www.youtube.com'
+    },
+    timeout: 30000
+  },
+  begin: 0,
+  lang: 'en'
+};
+
+// Add cookies if available
+if (process.env.YOUTUBE_COOKIES) {
+  ytdlOptions.requestOptions.headers['Cookie'] = process.env.YOUTUBE_COOKIES;
+  console.log('🍪 Using authenticated cookies for stream');
+}
 
     const resource = createAudioResource(stream, {
       inputType: 'arbitrary',
