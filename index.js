@@ -112,12 +112,82 @@ class MusicQueue {
 
 const musicQueues = new Map();
 
+let ytdlAgent = null;
+
+// Function to create agent with cookies
+function createYTDLAgent() {
+  try {
+    if (!process.env.YOUTUBE_COOKIES) {
+      console.log('⚠️ No YouTube cookies found, using default agent');
+      return null;
+    }
+
+    console.log('🍪 Creating agent with cookies...');
+    
+    // Parse cookies from EditThisCookie export (JSON format)
+    let cookies;
+    try {
+      // Try to parse as JSON first (EditThisCookie format)
+      cookies = JSON.parse(process.env.YOUTUBE_COOKIES);
+      console.log(`✅ Parsed ${cookies.length} cookies from JSON format`);
+    } catch (parseError) {
+      // If JSON parsing fails, try cookie header format
+      console.log('🔄 JSON parsing failed, trying cookie header format...');
+      const cookieHeader = process.env.YOUTUBE_COOKIES;
+      cookies = cookieHeader.split('; ').map(cookie => {
+        const [name, value] = cookie.split('=');
+        return {
+          name: name.trim(),
+          value: value ? value.trim() : '',
+          domain: '.youtube.com'
+        };
+      });
+    }
+
+    // Create agent with cookies
+    const agent = ytdl.createAgent(cookies);
+    console.log('✅ Agent created successfully with cookies');
+    return agent;
+
+  } catch (error) {
+    console.error('❌ Error creating agent with cookies:', error.message);
+    console.log('🔄 Using fallback agent without cookies');
+    
+    // Create basic agent without cookies as fallback
+    try {
+      return ytdl.createAgent();
+    } catch (fallbackError) {
+      console.error('❌ Failed to create fallback agent:', fallbackError.message);
+      return null;
+    }
+  }
+}
+
+// Initialize agent at startup
+async function initializeYTDLAgent() {
+  ytdlAgent = createYTDLAgent();
+  
+  // Test the agent
+  if (ytdlAgent) {
+    try {
+      // Test with a simple video
+      const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Rick Roll
+      const info = await ytdl.getInfo(testUrl, { agent: ytdlAgent });
+      console.log('✅ Agent test successful:', info.videoDetails.title);
+    } catch (testError) {
+      console.log('⚠️ Agent test failed:', testError.message);
+      console.log('🔄 Agent may still work for some videos');
+    }
+  }
+}
+
+
 // FIXED: Better video info function with YouTube bot detection workaround
 async function getVideoInfo(query) {
   try {
     console.log(`🔍 Searching for: ${query}`);
     
-    // Always search first to avoid direct YouTube API calls when possible
+    // Always search first for non-URLs
     if (!ytdl.validateURL(query)) {
       console.log('🔍 Searching YouTube...');
       const searchResults = await ytSearch(query);
@@ -135,48 +205,44 @@ async function getVideoInfo(query) {
         thumbnail: video.thumbnail || null
       };
     } else {
-      // For direct URLs, try to get info with multiple fallbacks
-      console.log('📺 Processing YouTube URL...');
+      // For direct URLs, use agent
+      console.log('📺 Processing YouTube URL with agent...');
       
-      // Enhanced user agents that work better with YouTube
-      const agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0'
+      const options = {};
+      
+      // Use agent if available
+      if (ytdlAgent) {
+        options.agent = ytdlAgent;
+        console.log('🤖 Using authenticated agent');
+      }
+      
+      // Try multiple times with different strategies
+      const strategies = [
+        // Strategy 1: Use agent with cookies
+        () => ytdl.getInfo(query, { agent: ytdlAgent }),
+        
+        // Strategy 2: Use agent without additional options
+        () => ytdl.getInfo(query, ytdlAgent ? { agent: ytdlAgent } : {}),
+        
+        // Strategy 3: Basic request without agent
+        () => ytdl.getInfo(query),
+        
+        // Strategy 4: With custom request options
+        () => ytdl.getInfo(query, {
+          requestOptions: {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            }
+          }
+        })
       ];
       
-      for (let i = 0; i < agents.length; i++) {
-        const agent = agents[i];
+      for (let i = 0; i < strategies.length; i++) {
         try {
-          console.log(`🔄 Trying method ${i + 1}/${agents.length} with agent: ${agent.substring(0, 50)}...`);
+          console.log(`🔄 Trying strategy ${i + 1}/${strategies.length}...`);
+          const info = await strategies[i]();
           
-          const headers = {
-            'User-Agent': agent,
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'cross-site',
-            'Upgrade-Insecure-Requests': '1'
-          };
-
-          // Add cookies if available
-          if (process.env.YOUTUBE_COOKIES) {
-            headers['Cookie'] = process.env.YOUTUBE_COOKIES;
-            console.log('🍪 Using cookies for authentication');
-          }
-
-          const info = await ytdl.getInfo(query, {
-            requestOptions: {
-              headers: headers,
-              timeout: 30000
-            }
-          });
-          
-          console.log('✅ Successfully got video info with cookies/agent');
+          console.log('✅ Successfully got video info');
           return {
             title: info.videoDetails.title,
             url: query,
@@ -184,22 +250,21 @@ async function getVideoInfo(query) {
             thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
           };
         } catch (err) {
-          console.log(`❌ Failed with method ${i + 1}: ${err.message}`);
+          console.log(`❌ Strategy ${i + 1} failed:`, err.message);
           
-          // If this is the last attempt, wait a bit before trying next method
-          if (i < agents.length - 1) {
+          // Wait before trying next strategy
+          if (i < strategies.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
       }
       
-      // If all direct methods fail, try to extract video ID and search for it
+      // Final fallback: search by video ID
       const videoIdMatch = query.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
       if (videoIdMatch) {
         const videoId = videoIdMatch[1];
-        console.log(`🆔 All direct methods failed. Extracted video ID: ${videoId}, searching instead...`);
+        console.log(`🆔 All direct methods failed. Searching by video ID: ${videoId}`);
         
-        // Search for the video by ID (this often works when direct access fails)
         const searchResults = await ytSearch(videoId);
         if (searchResults.videos && searchResults.videos.length > 0) {
           const video = searchResults.videos[0];
@@ -219,7 +284,8 @@ async function getVideoInfo(query) {
     return null;
   }
 }
-// FIXED: Much cleaner playMusic function
+
+// Updated playMusic function with agent support
 async function playMusic(guildId) {
   const queue = musicQueues.get(guildId);
   if (!queue || queue.isEmpty()) {
@@ -237,133 +303,86 @@ async function playMusic(guildId) {
   queue.isPlaying = true;
 
   console.log(`🎵 Attempting to play: ${song.title}`);
-  console.log(`🔗 URL: ${song.url}`);
 
   try {
-    // FIXED: Enhanced ytdl stream options with better error handling
-    const ytdlOptions = {
-      filter: 'audioonly',
-      quality: 'lowestaudio',
-      highWaterMark: 1024 * 512,
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': '*/*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'cross-site',
-          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Referer': 'https://www.youtube.com/',
-          'Origin': 'https://www.youtube.com'
-        },
-        timeout: 30000
-      },
-      begin: 0,
-      lang: 'en'
-    };
-
-    // Add cookies if available
-    if (process.env.YOUTUBE_COOKIES) {
-      ytdlOptions.requestOptions.headers['Cookie'] = process.env.YOUTUBE_COOKIES;
-      console.log('🍪 Using cookies for stream authentication');
-    }
-
-    // FIXED: Validate URL before creating stream
+    // Validate URL
     if (!ytdl.validateURL(song.url)) {
       throw new Error('Invalid YouTube URL');
     }
 
-    console.log('🔄 Creating ytdl stream...');
+    console.log('🔄 Creating ytdl stream with agent...');
     
-    // FIXED: Create stream with proper error handling
-    let stream;
-    try {
-      stream = ytdl(song.url, ytdlOptions);
-    } catch (streamError) {
-      console.error('❌ Failed to create ytdl stream:', streamError.message);
-      throw new Error(`Stream creation failed: ${streamError.message}`);
+    // Create stream with agent
+    const streamOptions = {
+      filter: 'audioonly',
+      quality: 'lowestaudio',
+      highWaterMark: 1024 * 512
+    };
+
+    // Add agent if available
+    if (ytdlAgent) {
+      streamOptions.agent = ytdlAgent;
+      console.log('🤖 Using authenticated agent for stream');
     }
 
-    // FIXED: Validate stream was created
+    let stream;
+    try {
+      stream = ytdl(song.url, streamOptions);
+    } catch (streamError) {
+      console.error('❌ Failed to create stream with agent, trying fallback...');
+      
+      // Fallback without agent
+      stream = ytdl(song.url, {
+        filter: 'audioonly',
+        quality: 'lowestaudio'
+      });
+    }
+
     if (!stream) {
-      throw new Error('Stream is null or undefined');
+      throw new Error('Failed to create stream');
     }
 
     console.log('✅ Stream created successfully');
 
-    // FIXED: Add stream error handling before creating resource
+    // Handle stream errors
     stream.on('error', (streamError) => {
       console.error('❌ Stream error:', streamError.message);
       if (queue.textChannel) {
         queue.textChannel.send('❌ Stream error, trying next song...').catch(console.error);
       }
-      // Try next song
       setTimeout(() => playMusic(guildId), 1000);
     });
 
-    // FIXED: Create audio resource with error handling
-    let resource;
-    try {
-      resource = createAudioResource(stream, {
-        inputType: 'arbitrary',
-        inlineVolume: true
-      });
-    } catch (resourceError) {
-      console.error('❌ Failed to create audio resource:', resourceError.message);
-      throw new Error(`Resource creation failed: ${resourceError.message}`);
-    }
+    // Create audio resource
+    const resource = createAudioResource(stream, {
+      inputType: 'arbitrary',
+      inlineVolume: true
+    });
 
-    if (!resource) {
-      throw new Error('Audio resource is null or undefined');
-    }
-
-    // Set reasonable volume
     if (resource.volume) {
       resource.volume.setVolume(0.3);
     }
 
-    console.log('✅ Audio resource created successfully');
-
-    // FIXED: Create new player for each song to avoid listener conflicts
+    // Create and configure player
     queue.player = createAudioPlayer();
     
-    // FIXED: Comprehensive player event handling
     queue.player.once(AudioPlayerStatus.Idle, () => {
-      console.log('🎵 Song finished normally');
-      // Small delay to prevent rapid-fire
+      console.log('🎵 Song finished');
       setTimeout(() => playMusic(guildId), 1000);
     });
 
     queue.player.once('error', (playerError) => {
       console.error('❌ Player error:', playerError.message);
       if (queue.textChannel) {
-        queue.textChannel.send(`❌ Playback error: ${playerError.message.substring(0, 100)}...`).catch(console.error);
+        queue.textChannel.send(`❌ Playback error, skipping...`).catch(console.error);
       }
       setTimeout(() => playMusic(guildId), 1000);
     });
 
-    // FIXED: Add additional error handling for player states
-    queue.player.on('stateChange', (oldState, newState) => {
-      console.log(`🔄 Player state: ${oldState.status} -> ${newState.status}`);
-    });
-
-    console.log('🎵 Starting playback...');
     queue.player.play(resource);
 
-    // FIXED: Ensure connection exists before subscribing
     if (queue.connection) {
-      const subscription = queue.connection.subscribe(queue.player);
-      if (!subscription) {
-        throw new Error('Failed to subscribe player to connection');
-      }
-      console.log('✅ Player subscribed to connection');
-    } else {
-      throw new Error('No voice connection available');
+      queue.connection.subscribe(queue.player);
     }
 
     // Send now playing message
@@ -384,51 +403,13 @@ async function playMusic(guildId) {
     console.log('✅ Successfully started playing:', song.title);
 
   } catch (error) {
-    console.error('❌ Critical error in playMusic:', error.message);
-    console.error('❌ Full error:', error);
+    console.error('❌ Error in playMusic:', error.message);
     
     if (queue.textChannel) {
-      queue.textChannel.send(`❌ Failed to play: **${song.title}**\nError: ${error.message}`).catch(console.error);
+      queue.textChannel.send(`❌ Failed to play: **${song.title}** - ${error.message}`).catch(console.error);
     }
     
-    // FIXED: Better error recovery - try alternative methods
-    console.log('🔄 Attempting alternative playback methods...');
-    
-    // Method 1: Try with different ytdl options
-    try {
-      console.log('🔄 Trying alternative stream method...');
-      const alternativeOptions = {
-        filter: 'audioonly',
-        quality: 'lowest',
-        format: 'mp4'
-      };
-      
-      if (process.env.YOUTUBE_COOKIES) {
-        alternativeOptions.requestOptions = {
-          headers: { 'Cookie': process.env.YOUTUBE_COOKIES }
-        };
-      }
-      
-      const altStream = ytdl(song.url, alternativeOptions);
-      const altResource = createAudioResource(altStream);
-      
-      queue.player = createAudioPlayer();
-      queue.player.once(AudioPlayerStatus.Idle, () => {
-        setTimeout(() => playMusic(guildId), 1000);
-      });
-      
-      queue.player.play(altResource);
-      queue.connection.subscribe(queue.player);
-      
-      console.log('✅ Alternative method successful');
-      return;
-      
-    } catch (altError) {
-      console.error('❌ Alternative method also failed:', altError.message);
-    }
-    
-    // Method 2: Skip to next song
-    console.log('🔄 Skipping to next song due to playback failure...');
+    // Try next song
     setTimeout(() => playMusic(guildId), 2000);
   }
 }
@@ -439,16 +420,19 @@ async function initializeBot() {
     const { default: nodeFetch } = await import('node-fetch');
     fetch = nodeFetch;
     
-    await pingWebhook(`🚀 TestificateInfo bot started at ${new Date().toISOString()}`);
+    // Initialize YTDL agent with cookies
+    await initializeYTDLAgent();
+    
+    await pingWebhook(`🚀 TestificateInfo bot started with agent at ${new Date().toISOString()}`);
 
-    // Ping every 5 minutes to keep Render service alive
+    // Ping every 5 minutes
     setInterval(() => {
       const now = new Date().toISOString();
       pingWebhook(`🏓 Keep-alive ping - ${now}`);
     }, 5 * 60 * 1000);
 
   } catch (error) {
-    console.error('❌ Failed to initialize fetch:', error);
+    console.error('❌ Failed to initialize bot:', error);
   }
 }
 
