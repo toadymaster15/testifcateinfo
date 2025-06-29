@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { Client: ExarotonClient } = require("exaroton");
-const { Client: DiscordClient, GatewayIntentBits, EmbedBuilder, AttachmentBuilder } = require("discord.js");
+const { Client: DiscordClient, GatewayIntentBits, EmbedBuilder, AttachmentBuilder, ActivityType } = require("discord.js");
 const express = require("express");
 
 let fetch;
@@ -120,34 +120,6 @@ function formatUptime(seconds) {
 }
 
 // Helper function to get status emoji and color
-async function updateBotStatus() {
-  try {
-    const server = exa.server(process.env.EXAROTON_SERVER_ID);
-    const serverInfo = await server.get();
-    const statusDisplay = getStatusDisplay(serverInfo.status);
-    
-    const statusMessages = {
-      0: { text: 'Server Offline | t!help', type: 'WATCHING' },
-      1: { text: `${serverInfo.playerCount || 0}/${serverInfo.maxPlayerCount || 0} players | t!help`, type: 'WATCHING' },
-      2: { text: 'Server Starting... | t!help', type: 'WATCHING' },
-      3: { text: 'Server Stopping... | t!help', type: 'WATCHING' },
-      4: { text: 'Server Restarting... | t!help', type: 'WATCHING' },
-      5: { text: 'Server Saving... | t!help', type: 'WATCHING' },
-      6: { text: 'Server Loading... | t!help', type: 'WATCHING' },
-      7: { text: 'Server Crashed | t!help', type: 'WATCHING' },
-    };
-    
-    const statusInfo = statusMessages[serverInfo.status] || { text: 'Unknown Status | t!help', type: 'WATCHING' };
-    
-    discord.user.setActivity(statusInfo.text, { type: statusInfo.type });
-    console.log(`🎯 Bot status updated: ${statusInfo.text}`);
-    
-  } catch (err) {
-    console.error("❌ Failed to update bot status:", err.message);
-    // Fallback to default status
-    discord.user.setActivity('Latest News from APG | t!help', { type: 'WATCHING' });
-  }
-}
 function getStatusDisplay(status) {
   const statusMap = {
     0: { name: "offline", emoji: "🔴", color: 0xff0000 },
@@ -163,21 +135,96 @@ function getStatusDisplay(status) {
   return statusMap[status] || { name: `unknown (${status})`, emoji: "❓", color: 0x808080 };
 }
 
+// Fixed status update function
+async function updateBotStatus() {
+  try {
+    // Check if bot is ready
+    if (!discord.user) {
+      console.log("⚠️ Bot not ready, skipping status update");
+      return;
+    }
+
+    const server = exa.server(process.env.EXAROTON_SERVER_ID);
+    const serverInfo = await server.get();
+    const statusDisplay = getStatusDisplay(serverInfo.status);
+    
+    const statusMessages = {
+      0: { text: 'Server Offline | t!help', type: ActivityType.Watching },
+      1: { text: `${serverInfo.playerCount || 0}/${serverInfo.maxPlayerCount || 0} players | t!help`, type: ActivityType.Watching },
+      2: { text: 'Server Starting... | t!help', type: ActivityType.Watching },
+      3: { text: 'Server Stopping... | t!help', type: ActivityType.Watching },
+      4: { text: 'Server Restarting... | t!help', type: ActivityType.Watching },
+      5: { text: 'Server Saving... | t!help', type: ActivityType.Watching },
+      6: { text: 'Server Loading... | t!help', type: ActivityType.Watching },
+      7: { text: 'Server Crashed | t!help', type: ActivityType.Watching },
+    };
+    
+    const statusInfo = statusMessages[serverInfo.status] || { 
+      text: 'Unknown Status | t!help', 
+      type: ActivityType.Watching 
+    };
+    
+    // Use the correct method for setting activity
+    await discord.user.setPresence({
+      activities: [{
+        name: statusInfo.text,
+        type: statusInfo.type
+      }],
+      status: 'online'
+    });
+    
+    console.log(`🎯 Bot status updated: ${statusInfo.text}`);
+    
+  } catch (err) {
+    console.error("❌ Failed to update bot status:", err.message);
+    
+    // Fallback to default status
+    if (discord.user) {
+      try {
+        await discord.user.setPresence({
+          activities: [{
+            name: 'Latest News from APG | t!help',
+            type: ActivityType.Watching
+          }],
+          status: 'online'
+        });
+        console.log("🎯 Set fallback status");
+      } catch (fallbackErr) {
+        console.error("❌ Failed to set fallback status:", fallbackErr.message);
+      }
+    }
+  }
+}
+
 discord.once("ready", async () => {
   console.log(`✅ Logged in as ${discord.user.tag}`);
 
-  // Set custom bot status
-  try {
-    // Option 1: Simple status
-    discord.user.setActivity('APG Server | t!help', { type: 'WATCHING' });
-    
-    // Option 2: Dynamic status based on server status (uncomment to use)
-    await updateBotStatus();
-    
-    console.log("🎯 Bot status set successfully");
-  } catch (err) {
-    console.error("❌ Failed to set bot status:", err.message);
-  }
+  // Wait a moment for the bot to fully initialize
+  setTimeout(async () => {
+    try {
+      console.log("🎯 Setting initial bot status...");
+      
+      // Set initial status
+      await discord.user.setPresence({
+        activities: [{
+          name: 'APG Server | t!help',
+          type: ActivityType.Watching
+        }],
+        status: 'online'
+      });
+      
+      console.log("🎯 Initial bot status set successfully");
+      
+      // Then update with dynamic status if enabled
+      if (process.env.DYNAMIC_STATUS === 'true') {
+        console.log("🔄 Dynamic status enabled, updating...");
+        await updateBotStatus();
+      }
+      
+    } catch (err) {
+      console.error("❌ Failed to set bot status:", err.message);
+    }
+  }, 2000); // Wait 2 seconds
 
   // Test server connection on startup
   try {
@@ -216,7 +263,7 @@ discord.on("messageCreate", async (message) => {
         .setFooter({ text: "TestificateInfo Bot" });
       
       // If you don't have a hosted image, we'll just send text
-      message.reply("**LANCER STATUS: ALIVE**");
+     message.reply({ embeds: [embed] });
       
     } catch (err) {
       console.error("❌ Error with lancer status:", err.message);
@@ -233,7 +280,7 @@ discord.on("messageCreate", async (message) => {
       .addFields(
         { name: "t!time", value: "get the current day on APG", inline: false },
         { name: "t!lancerstatus", value: "check up on lancer", inline: false },
-        { name: "❓ t!help", value: "show dis mesage", inline: false }
+        { name: "t!help", value: "show dis mesage", inline: false }
       )
       .setTimestamp()
       .setFooter({ text: "TestificateInfo Bot" });
@@ -380,10 +427,21 @@ discord.on("messageCreate", async (message) => {
 // Initialize the bot
 initializeBot();
 
+// Fixed interval for dynamic status updates
 setInterval(async () => {
-      if (process.env.DYNAMIC_STATUS === 'true') {
-        await updateBotStatus();
-      }
-    }, 2 * 60 * 1000); // 2 minutes
+  if (process.env.DYNAMIC_STATUS === 'true') {
+    console.log("🔄 Running scheduled status update...");
+    await updateBotStatus();
+  }
+}, 2 * 60 * 1000); // 2 minutes
+
+// Add error handling for the bot
+discord.on('error', (error) => {
+  console.error('❌ Discord client error:', error);
+});
+
+discord.on('warn', (warning) => {
+  console.warn('⚠️ Discord client warning:', warning);
+});
 
 discord.login(process.env.DISCORD_TOKEN);
