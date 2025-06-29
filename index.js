@@ -48,15 +48,28 @@ const discord = new DiscordClient({
   ],
 });
 
-// Fixed getEmoji function - now references the correct client and guild emojis
+// Fixed getEmoji function - now references application emojis from Discord Developer Portal
 const getEmoji = (name) => {
-  // Try to find the emoji in all guilds the bot is in
-  for (const [guildId, guild] of discord.guilds.cache) {
-    const emoji = guild.emojis.cache.find(e => e.name === name);
-    if (emoji) return emoji.toString();
+  try {
+    // Check if bot is ready and application is available
+    if (!discord.user || !discord.application) {
+      console.log(`⚠️ Bot not ready or application not available for emoji: ${name}`);
+      return name;
+    }
+    
+    // Try to find the emoji in application emojis
+    const emoji = discord.application.emojis?.cache?.find(e => e.name === name);
+    if (emoji) {
+      console.log(`✅ Found application emoji: ${name} -> ${emoji.toString()}`);
+      return emoji.toString();
+    }
+    
+    console.log(`⚠️ Application emoji not found: ${name}`);
+    return name;
+  } catch (error) {
+    console.error(`❌ Error getting emoji ${name}:`, error.message);
+    return name;
   }
-  // If not found, return the name as fallback
-  return name;
 };
 
 async function pingWebhook(message) {
@@ -210,6 +223,24 @@ async function updateBotStatus() {
 
 discord.once("ready", async () => {
   console.log(`✅ Logged in as ${discord.user.tag}`);
+
+  // Load application emojis
+  try {
+    console.log("🎭 Loading application emojis...");
+    if (discord.application) {
+      await discord.application.emojis.fetch();
+      console.log(`✅ Loaded ${discord.application.emojis.cache.size} application emojis`);
+      
+      // Debug: List all available application emojis
+      discord.application.emojis.cache.forEach(emoji => {
+        console.log(`📍 Available emoji: ${emoji.name} (${emoji.id})`);
+      });
+    } else {
+      console.log("⚠️ Application not available for emoji loading");
+    }
+  } catch (err) {
+    console.error("❌ Failed to load application emojis:", err.message);
+  }
 
   // Wait a moment for the bot to fully initialize
   setTimeout(async () => {
