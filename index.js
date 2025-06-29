@@ -319,18 +319,18 @@ const getEmoji = (name) => client.application.emojis.cache.find(e => e.name === 
     ],
     
     uncertain: [
-      '${getEmoji('boat')} **UNVERIFIED** - insuficient data on this topic so probly idk',
-      '${getEmoji('boat')} **UNCLEAR** - we don know',
-      '${getEmoji('boat')} **INCONCLUSIVE** - more investigation is needed by testificate exeperts',
-     '${getEmoji('boat')} **MIXED** - some sourcs say that it corect, some NOT.',
-      '${getEmoji('boat')} **UNDER REVIEW** - currently under review becauz um we dont pay our workers and they ned time to fact check but probly no',
-      '${getEmoji('boat')} **PARTIALLY TRUE** - idk bro i think it true beased on my SOURCES'
+      `${getEmoji('boat')} **UNVERIFIED** - insuficient data on this topic so probly idk`,
+      `${getEmoji('boat')} **UNCLEAR** - we don know`,
+      `${getEmoji('boat')} **INCONCLUSIVE** - more investigation is needed by testificate exeperts`,
+     `${getEmoji('boat')} **MIXED** - some sourcs say that it corect, some NOT.`,
+      `${getEmoji('boat')} **UNDER REVIEW** - currently under review becauz um we dont pay our workers and they ned time to fact check but probly no`,
+      `${getEmoji('boat')} **PARTIALLY TRUE** - idk bro i think it true beased on my SOURCES`
     ],
     
     sassy: [
       "😡 **OBVIOUSLY FALSE** - least obvius RAGE BIAT!!!! MODS BAN HIM!!!! tis so obivous bro it false",
-      '😡 **shut up** - fuck off use yur BRAIN',
-      '${getEmoji('sybau')} **CLEARLY WRONG** -90% of interviewed say that this info is FAKE',
+      `😡 **shut up** - fuck off use yur BRAIN`,
+      `${getEmoji('sybau')} **CLEARLY WRONG** -90% of interviewed say that this info is FAKE`
     ],
     
     meme: [
