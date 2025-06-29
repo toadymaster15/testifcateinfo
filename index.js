@@ -37,7 +37,27 @@ app.listen(PORT, () => {
 
 // Webhook keep-alive function
 const WEBHOOK_URL = process.env.WEBHOOK; // Add this to your .env file
-const getEmoji = (name) => discord.application.emojis.cache.find(e => e.name === name);
+
+// Initialize Discord and Exaroton clients
+const exa = new ExarotonClient(process.env.EXAROTON_TOKEN);
+const discord = new DiscordClient({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+// Fixed getEmoji function - now references the correct client and guild emojis
+const getEmoji = (name) => {
+  // Try to find the emoji in all guilds the bot is in
+  for (const [guildId, guild] of discord.guilds.cache) {
+    const emoji = guild.emojis.cache.find(e => e.name === name);
+    if (emoji) return emoji.toString();
+  }
+  // If not found, return the name as fallback
+  return name;
+};
 
 async function pingWebhook(message) {
   if (!WEBHOOK_URL) {
@@ -99,15 +119,6 @@ async function initializeBot() {
     console.error("❌ Failed to initialize fetch:", error);
   }
 }
-
-const exa = new ExarotonClient(process.env.EXAROTON_TOKEN);
-const discord = new DiscordClient({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-});
 
 // Helper function to format uptime
 function formatUptime(seconds) {
@@ -323,7 +334,7 @@ discord.on("messageCreate", async (message) => {
       `${getEmoji('boat')} **UNVERIFIED** - insuficient data on this topic so probly idk`,
       `${getEmoji('boat')} **UNCLEAR** - we don know`,
       `${getEmoji('boat')} **INCONCLUSIVE** - more investigation is needed by testificate exeperts`,
-     `${getEmoji('boat')} **MIXED** - some sourcs say that it corect, some NOT.`,
+      `${getEmoji('boat')} **MIXED** - some sourcs say that it corect, some NOT.`,
       `${getEmoji('boat')} **UNDER REVIEW** - currently under review becauz um we dont pay our workers and they ned time to fact check but probly no`,
       `${getEmoji('boat')} **PARTIALLY TRUE** - idk bro i think it true beased on my SOURCES`
     ],
