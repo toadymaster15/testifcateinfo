@@ -112,23 +112,13 @@ class MusicQueue {
 
 const musicQueues = new Map();
 
-// FIXED: Simplified video info function with better error handling
+// FIXED: Better video info function with YouTube bot detection workaround
 async function getVideoInfo(query) {
   try {
     console.log(`🔍 Searching for: ${query}`);
     
-    // Check if it's a YouTube URL
-    if (ytdl.validateURL(query)) {
-      console.log('📺 Processing YouTube URL...');
-      const info = await ytdl.getInfo(query);
-      return {
-        title: info.videoDetails.title,
-        url: query,
-        duration: parseInt(info.videoDetails.lengthSeconds),
-        thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
-      };
-    } else {
-      // Search for the video
+    // Always search first to avoid direct YouTube API calls when possible
+    if (!ytdl.validateURL(query)) {
       console.log('🔍 Searching YouTube...');
       const searchResults = await ytSearch(query);
       
@@ -144,6 +134,64 @@ async function getVideoInfo(query) {
         duration: video.duration?.seconds || 0,
         thumbnail: video.thumbnail || null
       };
+    } else {
+      // For direct URLs, try to get info with multiple fallbacks
+      console.log('📺 Processing YouTube URL...');
+      
+      // Try with different user agents and options
+      const agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      ];
+      
+      for (const agent of agents) {
+        try {
+          const info = await ytdl.getInfo(query, {
+            requestOptions: {
+              headers: {
+                'User-Agent': agent,
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+              }
+            }
+          });
+          
+          return {
+            title: info.videoDetails.title,
+            url: query,
+            duration: parseInt(info.videoDetails.lengthSeconds),
+            thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
+          };
+        } catch (err) {
+          console.log(`❌ Failed with agent: ${agent.substring(0, 50)}...`);
+          continue;
+        }
+      }
+      
+      // If all direct methods fail, try to extract video ID and search for it
+      const videoIdMatch = query.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+      if (videoIdMatch) {
+        const videoId = videoIdMatch[1];
+        console.log(`🆔 Extracted video ID: ${videoId}, searching instead...`);
+        
+        // Search for the video by ID (this often works when direct access fails)
+        const searchResults = await ytSearch(videoId);
+        if (searchResults.videos && searchResults.videos.length > 0) {
+          const video = searchResults.videos[0];
+          return {
+            title: video.title,
+            url: video.url,
+            duration: video.duration?.seconds || 0,
+            thumbnail: video.thumbnail || null
+          };
+        }
+      }
+      
+      throw new Error('All methods failed');
     }
   } catch (error) {
     console.error('❌ Error getting video info:', error.message);
@@ -171,16 +219,30 @@ async function playMusic(guildId) {
   try {
     console.log(`🎵 Now playing: ${song.title}`);
     
-    // FIXED: Better ytdl stream options
+    // FIXED: Anti-bot detection ytdl stream options
     const stream = ytdl(song.url, {
       filter: 'audioonly',
       quality: 'lowestaudio',
-      highWaterMark: 1024 * 512, // Reduced buffer size
+      highWaterMark: 1024 * 512,
       requestOptions: {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-      }
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'cross-site',
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"'
+        },
+        timeout: 30000
+      },
+      // Additional anti-detection options
+      begin: 0,
+      lang: 'en'
     });
 
     const resource = createAudioResource(stream, {
