@@ -252,7 +252,7 @@ discord.on("messageCreate", async (message) => {
     
     try {
       // Create a simple lancer image URL (you can replace this with your own image)
-      const lancerImageUrl = "https://lh6.googleusercontent.com/2Ily2mjA9308eeQ9o_FjvFde8npF8fM5rb4eXwAM77TNCvODsVUYGY5pFP9FQ5rU2m2yX3EXdWkaLeAuUJf_sSA"; // Replace with actual image URL
+      const lancerImageUrl = "https://cdn.discordapp.com/attachments/1387880532137869324/1388909600677298299/alivelancer.png?ex=6862b25d&is=686160dd&hm=fefb1351e6529c8a169466003ae6d5982c7e5c6d01f02dcd417297fe0470c73a&"; // Replace with actual image URL
       
       const embed = new EmbedBuilder()
         .setTitle("is bouncy little pumpkin aliv?")
