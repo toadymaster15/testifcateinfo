@@ -2,7 +2,7 @@ require("dotenv").config();
 const { Client: ExarotonClient } = require("exaroton");
 const { Client: DiscordClient, GatewayIntentBits, EmbedBuilder, AttachmentBuilder } = require("discord.js");
 const express = require("express");
-// Use dynamic import for node-fetch instead of require
+
 let fetch;
 
 // Create Express app for keep-alive
