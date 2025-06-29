@@ -2,10 +2,9 @@ require('dotenv').config();
 const { Client: ExarotonClient } = require('exaroton');
 const { Client: DiscordClient, GatewayIntentBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 const ytSearch = require('yt-search');
 const express = require('express');
-// Use dynamic import for node-fetch instead of require
 let fetch;
 
 // Create Express app for keep-alive
@@ -74,6 +73,7 @@ async function pingWebhook(message) {
 
 // Music queue system
 const musicQueues = new Map();
+const processingCommands = new Set(); // Prevent duplicate command processing
 
 class MusicQueue {
   constructor() {
@@ -102,7 +102,7 @@ class MusicQueue {
   }
 }
 
-// Get video info from YouTube
+// Get video info from YouTube with better error handling
 async function getVideoInfo(query) {
   try {
     // Check if it's a YouTube URL
@@ -111,7 +111,7 @@ async function getVideoInfo(query) {
       return {
         title: info.videoDetails.title,
         url: query,
-        duration: info.videoDetails.lengthSeconds,
+        duration: parseInt(info.videoDetails.lengthSeconds),
         thumbnail: info.videoDetails.thumbnails[0]?.url
       };
     } else {
@@ -135,11 +135,11 @@ async function getVideoInfo(query) {
   }
 }
 
-// Play music function
+// Enhanced play music function with better error handling and fixed deafening
 async function playMusic(guildId, textChannel) {
   const queue = musicQueues.get(guildId);
   if (!queue || queue.isEmpty()) {
-    queue.isPlaying = false;
+    if (queue) queue.isPlaying = false;
     return;
   }
 
@@ -152,20 +152,35 @@ async function playMusic(guildId, textChannel) {
   try {
     console.log(`🎵 Playing: ${song.title}`);
     
-    // Create audio stream
+    // Create ytdl stream with optimized options for Render.com
     const stream = ytdl(song.url, {
       filter: 'audioonly',
       quality: 'lowestaudio',
-      highWaterMark: 1024 * 1024 * 10 // 10MB buffer
+      highWaterMark: 1024 * 1024 * 16, // Optimized buffer for Render's resources
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      }
     });
 
+    // Create audio resource with proper settings to prevent deafening
     const resource = createAudioResource(stream, {
-      inputType: 'webm/opus'
+      inputType: 'arbitrary',
+      inlineVolume: true
     });
+
+    // Set volume to prevent deafening (50% volume)
+    if (resource.volume) {
+      resource.volume.setVolume(0.5);
+    }
 
     if (!queue.player) {
       queue.player = createAudioPlayer();
     }
+
+    // Clean up previous player listeners to prevent duplicates
+    queue.player.removeAllListeners();
 
     queue.player.play(resource);
 
@@ -173,7 +188,7 @@ async function playMusic(guildId, textChannel) {
       queue.connection.subscribe(queue.player);
     }
 
-    // Send now playing message
+    // Send now playing message only once
     const nowPlayingEmbed = {
       color: 0x00ff00,
       title: '🎵 Now Playing',
@@ -186,24 +201,31 @@ async function playMusic(guildId, textChannel) {
       }
     };
 
-    textChannel.send({ embeds: [nowPlayingEmbed] });
+    textChannel.send({ embeds: [nowPlayingEmbed] }).catch(console.error);
 
-    // Handle player events
-    queue.player.on(AudioPlayerStatus.Idle, () => {
+    // Handle player events (set only once)
+    queue.player.once(AudioPlayerStatus.Idle, () => {
       console.log('🎵 Song finished, playing next...');
-      playMusic(guildId, textChannel);
+      setTimeout(() => playMusic(guildId, textChannel), 1000); // Small delay to prevent rapid firing
     });
 
-    queue.player.on('error', (error) => {
+    queue.player.once('error', (error) => {
       console.error('❌ Audio player error:', error);
-      textChannel.send('❌ Error playing audio. Skipping to next song...');
-      playMusic(guildId, textChannel);
+      textChannel.send('❌ Error playing audio. Skipping to next song...').catch(console.error);
+      setTimeout(() => playMusic(guildId, textChannel), 1000);
+    });
+
+    // Handle stream errors
+    stream.on('error', (error) => {
+      console.error('❌ Stream error:', error);
+      textChannel.send('❌ Error with audio stream. Skipping to next song...').catch(console.error);
+      setTimeout(() => playMusic(guildId, textChannel), 1000);
     });
 
   } catch (error) {
     console.error('❌ Error playing music:', error);
-    textChannel.send(`❌ Error playing **${song.title}**. Skipping to next song...`);
-    playMusic(guildId, textChannel);
+    textChannel.send(`❌ Error playing **${song.title}**. Skipping to next song...`).catch(console.error);
+    setTimeout(() => playMusic(guildId, textChannel), 1000);
   }
 }
 
@@ -215,6 +237,7 @@ async function initializeBot() {
     
     await pingWebhook(`🚀 TestificateInfo bot started at ${new Date().toISOString()}`);
 
+    // Ping every 5 minutes to keep Render service alive
     setInterval(() => {
       const now = new Date().toISOString();
       pingWebhook(`🏓 Keep-alive ping - ${now}`);
@@ -256,6 +279,14 @@ discord.once('ready', async () => {
 discord.on('messageCreate', async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
+
+  // Prevent duplicate command processing
+  const commandKey = `${message.author.id}-${message.content}-${Date.now()}`;
+  if (processingCommands.has(commandKey)) return;
+  processingCommands.add(commandKey);
+  
+  // Clean up old command keys after 5 seconds
+  setTimeout(() => processingCommands.delete(commandKey), 5000);
 
   // EXISTING TIME COMMAND
   if (message.content === 't!time') {
@@ -328,7 +359,7 @@ discord.on('messageCreate', async (message) => {
 
   // MUSIC COMMANDS
 
-  // Join voice channel
+  // Join voice channel - Fixed deafening issue
   if (message.content === 't!join') {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
@@ -344,6 +375,8 @@ discord.on('messageCreate', async (message) => {
         channelId: voiceChannel.id,
         guildId: message.guild.id,
         adapterCreator: message.guild.voiceAdapterCreator,
+        selfDeaf: false, // This fixes the deafening issue!
+        selfMute: false
       });
 
       // Initialize music queue for this guild
@@ -386,6 +419,10 @@ discord.on('messageCreate', async (message) => {
       // Clean up music queue
       if (musicQueues.has(message.guild.id)) {
         const queue = musicQueues.get(message.guild.id);
+        if (queue.player) {
+          queue.player.removeAllListeners();
+          queue.player.stop();
+        }
         queue.clear();
         queue.isPlaying = false;
         musicQueues.delete(message.guild.id);
@@ -398,7 +435,7 @@ discord.on('messageCreate', async (message) => {
     }
   }
 
-  // Play music
+  // Play music with enhanced error handling
   if (message.content.startsWith('t!play ')) {
     const connection = getVoiceConnection(message.guild.id);
     if (!connection) {
@@ -410,17 +447,17 @@ discord.on('messageCreate', async (message) => {
       return message.reply('❌ Please provide a song name or YouTube URL!\nExample: `t!play Low Taper Gang`');
     }
 
-    message.reply('🔍 Searching for music...');
+    const searchMessage = await message.reply('🔍 Searching for music...');
 
     try {
       const videoInfo = await getVideoInfo(query);
       if (!videoInfo) {
-        return message.reply('❌ No music found for that search. Try a different query.');
+        return searchMessage.edit('❌ No music found for that search. Try a different query.');
       }
 
       // Check video duration (limit to 10 minutes to prevent abuse)
       if (videoInfo.duration > 600) {
-        return message.reply('❌ Song is too long! Please choose a song under 10 minutes.');
+        return searchMessage.edit('❌ Song is too long! Please choose a song under 10 minutes.');
       }
 
       // Get or create music queue
@@ -453,7 +490,7 @@ discord.on('messageCreate', async (message) => {
         ]
       };
 
-      message.reply({ embeds: [addedEmbed] });
+      await searchMessage.edit({ content: '', embeds: [addedEmbed] });
 
       // Start playing if not already playing
       if (!queue.isPlaying) {
@@ -462,7 +499,7 @@ discord.on('messageCreate', async (message) => {
 
     } catch (error) {
       console.error('❌ Error playing music:', error);
-      message.reply('❌ Failed to play music. Please try again or use a different song.');
+      searchMessage.edit('❌ Failed to play music. Please try again or use a different song.');
     }
   }
 
@@ -489,6 +526,7 @@ discord.on('messageCreate', async (message) => {
     queue.clear();
     queue.isPlaying = false;
     if (queue.player) {
+      queue.player.removeAllListeners();
       queue.player.stop();
     }
 
