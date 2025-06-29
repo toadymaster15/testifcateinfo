@@ -236,76 +236,134 @@ async function playMusic(guildId) {
   queue.currentSong = song;
   queue.isPlaying = true;
 
+  console.log(`🎵 Attempting to play: ${song.title}`);
+  console.log(`🔗 URL: ${song.url}`);
+
   try {
-    console.log(`🎵 Now playing: ${song.title}`);
-    
-    // FIXED: Anti-bot detection ytdl stream options
+    // FIXED: Enhanced ytdl stream options with better error handling
     const ytdlOptions = {
-  filter: 'audioonly',
-  quality: 'lowestaudio',
-  highWaterMark: 1024 * 512,
-  requestOptions: {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'cross-site',
-      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
-      'Sec-Ch-Ua-Mobile': '?0',
-      'Sec-Ch-Ua-Platform': '"Windows"',
-      'Upgrade-Insecure-Requests': '1',
-      // Add referer to look more legitimate
-      'Referer': 'https://www.youtube.com/',
-      'Origin': 'https://www.youtube.com'
-    },
-    timeout: 30000
-  },
-  begin: 0,
-  lang: 'en'
-};
+      filter: 'audioonly',
+      quality: 'lowestaudio',
+      highWaterMark: 1024 * 512,
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'cross-site',
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"',
+          'Referer': 'https://www.youtube.com/',
+          'Origin': 'https://www.youtube.com'
+        },
+        timeout: 30000
+      },
+      begin: 0,
+      lang: 'en'
+    };
 
-// Add cookies if available
-if (process.env.YOUTUBE_COOKIES) {
-  ytdlOptions.requestOptions.headers['Cookie'] = process.env.YOUTUBE_COOKIES;
-  console.log('🍪 Using authenticated cookies for stream');
-}
+    // Add cookies if available
+    if (process.env.YOUTUBE_COOKIES) {
+      ytdlOptions.requestOptions.headers['Cookie'] = process.env.YOUTUBE_COOKIES;
+      console.log('🍪 Using cookies for stream authentication');
+    }
 
-    const resource = createAudioResource(stream, {
-      inputType: 'arbitrary',
-      inlineVolume: true
+    // FIXED: Validate URL before creating stream
+    if (!ytdl.validateURL(song.url)) {
+      throw new Error('Invalid YouTube URL');
+    }
+
+    console.log('🔄 Creating ytdl stream...');
+    
+    // FIXED: Create stream with proper error handling
+    let stream;
+    try {
+      stream = ytdl(song.url, ytdlOptions);
+    } catch (streamError) {
+      console.error('❌ Failed to create ytdl stream:', streamError.message);
+      throw new Error(`Stream creation failed: ${streamError.message}`);
+    }
+
+    // FIXED: Validate stream was created
+    if (!stream) {
+      throw new Error('Stream is null or undefined');
+    }
+
+    console.log('✅ Stream created successfully');
+
+    // FIXED: Add stream error handling before creating resource
+    stream.on('error', (streamError) => {
+      console.error('❌ Stream error:', streamError.message);
+      if (queue.textChannel) {
+        queue.textChannel.send('❌ Stream error, trying next song...').catch(console.error);
+      }
+      // Try next song
+      setTimeout(() => playMusic(guildId), 1000);
     });
+
+    // FIXED: Create audio resource with error handling
+    let resource;
+    try {
+      resource = createAudioResource(stream, {
+        inputType: 'arbitrary',
+        inlineVolume: true
+      });
+    } catch (resourceError) {
+      console.error('❌ Failed to create audio resource:', resourceError.message);
+      throw new Error(`Resource creation failed: ${resourceError.message}`);
+    }
+
+    if (!resource) {
+      throw new Error('Audio resource is null or undefined');
+    }
 
     // Set reasonable volume
     if (resource.volume) {
       resource.volume.setVolume(0.3);
     }
 
+    console.log('✅ Audio resource created successfully');
+
     // FIXED: Create new player for each song to avoid listener conflicts
     queue.player = createAudioPlayer();
     
-    // FIXED: Single event listener setup
+    // FIXED: Comprehensive player event handling
     queue.player.once(AudioPlayerStatus.Idle, () => {
-      console.log('🎵 Song finished');
+      console.log('🎵 Song finished normally');
       // Small delay to prevent rapid-fire
-      setTimeout(() => playMusic(guildId), 500);
+      setTimeout(() => playMusic(guildId), 1000);
     });
 
-    queue.player.once('error', (error) => {
-      console.error('❌ Player error:', error.message);
+    queue.player.once('error', (playerError) => {
+      console.error('❌ Player error:', playerError.message);
       if (queue.textChannel) {
-        queue.textChannel.send('❌ Audio error, skipping song...').catch(console.error);
+        queue.textChannel.send(`❌ Playback error: ${playerError.message.substring(0, 100)}...`).catch(console.error);
       }
-      setTimeout(() => playMusic(guildId), 500);
+      setTimeout(() => playMusic(guildId), 1000);
     });
 
+    // FIXED: Add additional error handling for player states
+    queue.player.on('stateChange', (oldState, newState) => {
+      console.log(`🔄 Player state: ${oldState.status} -> ${newState.status}`);
+    });
+
+    console.log('🎵 Starting playback...');
     queue.player.play(resource);
 
+    // FIXED: Ensure connection exists before subscribing
     if (queue.connection) {
-      queue.connection.subscribe(queue.player);
+      const subscription = queue.connection.subscribe(queue.player);
+      if (!subscription) {
+        throw new Error('Failed to subscribe player to connection');
+      }
+      console.log('✅ Player subscribed to connection');
+    } else {
+      throw new Error('No voice connection available');
     }
 
     // Send now playing message
@@ -323,13 +381,55 @@ if (process.env.YOUTUBE_COOKIES) {
       queue.textChannel.send({ embeds: [embed] }).catch(console.error);
     }
 
+    console.log('✅ Successfully started playing:', song.title);
+
   } catch (error) {
-    console.error('❌ Error in playMusic:', error.message);
+    console.error('❌ Critical error in playMusic:', error.message);
+    console.error('❌ Full error:', error);
+    
     if (queue.textChannel) {
-      queue.textChannel.send(`❌ Failed to play: ${song.title}`).catch(console.error);
+      queue.textChannel.send(`❌ Failed to play: **${song.title}**\nError: ${error.message}`).catch(console.error);
     }
-    // Try next song
-    setTimeout(() => playMusic(guildId), 500);
+    
+    // FIXED: Better error recovery - try alternative methods
+    console.log('🔄 Attempting alternative playback methods...');
+    
+    // Method 1: Try with different ytdl options
+    try {
+      console.log('🔄 Trying alternative stream method...');
+      const alternativeOptions = {
+        filter: 'audioonly',
+        quality: 'lowest',
+        format: 'mp4'
+      };
+      
+      if (process.env.YOUTUBE_COOKIES) {
+        alternativeOptions.requestOptions = {
+          headers: { 'Cookie': process.env.YOUTUBE_COOKIES }
+        };
+      }
+      
+      const altStream = ytdl(song.url, alternativeOptions);
+      const altResource = createAudioResource(altStream);
+      
+      queue.player = createAudioPlayer();
+      queue.player.once(AudioPlayerStatus.Idle, () => {
+        setTimeout(() => playMusic(guildId), 1000);
+      });
+      
+      queue.player.play(altResource);
+      queue.connection.subscribe(queue.player);
+      
+      console.log('✅ Alternative method successful');
+      return;
+      
+    } catch (altError) {
+      console.error('❌ Alternative method also failed:', altError.message);
+    }
+    
+    // Method 2: Skip to next song
+    console.log('🔄 Skipping to next song due to playback failure...');
+    setTimeout(() => playMusic(guildId), 2000);
   }
 }
 
@@ -543,63 +643,100 @@ discord.on('messageCreate', async (message) => {
 
   // FIXED: Play music command
   if (message.content.startsWith('t!play ')) {
-    const connection = getVoiceConnection(message.guild.id);
-    if (!connection) {
-      return message.reply('❌ I need to be in a voice channel first! Use `t!join`');
-    }
-
-    const query = message.content.slice(7).trim();
-    if (!query) {
-      return message.reply('❌ Please provide a song name or YouTube URL!');
-    }
-
-    const searchMessage = await message.reply('🔍 Searching...');
-
-    try {
-      const videoInfo = await getVideoInfo(query);
-      if (!videoInfo) {
-        return searchMessage.edit('❌ No results found!');
-      }
-
-      // Duration check
-      if (videoInfo.duration > 600) {
-        return searchMessage.edit('❌ Song too long! (Max 10 minutes)');
-      }
-
-      // Get queue
-      let queue = musicQueues.get(message.guild.id);
-      if (!queue) {
-        queue = new MusicQueue();
-        queue.connection = connection;
-        queue.textChannel = message.channel;
-        musicQueues.set(message.guild.id, queue);
-      }
-
-      queue.addSong(videoInfo);
-
-      const embed = {
-        color: 0x0099ff,
-        title: '✅ Added to Queue',
-        description: `**${videoInfo.title}**`,
-        thumbnail: videoInfo.thumbnail ? { url: videoInfo.thumbnail } : undefined,
-        fields: [
-          { name: 'Position', value: `${queue.songs.length}`, inline: true },
-          { name: 'Duration', value: `${Math.floor(videoInfo.duration / 60)}:${(videoInfo.duration % 60).toString().padStart(2, '0')}`, inline: true }
-        ]
-      };
-
-      await searchMessage.edit({ content: '', embeds: [embed] });
-
-      // Start playing if not already playing
-      if (!queue.isPlaying) {
-        playMusic(message.guild.id);
-      }
-
-    } catch (error) {
-      console.error('❌ Error in play command:', error);
-      searchMessage.edit('❌ Failed to play music. Try again!');
-    }
+  const connection = getVoiceConnection(message.guild.id);
+  if (!connection) {
+    return message.reply('❌ I need to be in a voice channel first! Use `t!join`');
   }
+
+  const query = message.content.slice(7).trim();
+  if (!query) {
+    return message.reply('❌ Please provide a song name or YouTube URL!');
+  }
+
+  const searchMessage = await message.reply('🔍 Searching...');
+
+  try {
+    console.log(`🔍 Processing play request: "${query}"`);
+    
+    const videoInfo = await getVideoInfo(query);
+    if (!videoInfo) {
+      return searchMessage.edit('❌ No results found! Try a different search term.');
+    }
+
+    console.log(`✅ Found video: ${videoInfo.title}`);
+
+    // Duration check (10 minutes = 600 seconds)
+    if (videoInfo.duration > 600) {
+      return searchMessage.edit(`❌ Song too long! (${Math.floor(videoInfo.duration / 60)}:${(videoInfo.duration % 60).toString().padStart(2, '0')} - Max 10:00)`);
+    }
+
+    // Additional URL validation
+    if (!ytdl.validateURL(videoInfo.url)) {
+      console.error('❌ Invalid YouTube URL received:', videoInfo.url);
+      return searchMessage.edit('❌ Invalid YouTube URL. Please try again.');
+    }
+
+    // Get or create queue
+    let queue = musicQueues.get(message.guild.id);
+    if (!queue) {
+      console.log('🔄 Creating new music queue');
+      queue = new MusicQueue();
+      queue.connection = connection;
+      queue.textChannel = message.channel;
+      musicQueues.set(message.guild.id, queue);
+    }
+
+    // Verify connection is still valid
+    if (queue.connection.state.status === VoiceConnectionStatus.Destroyed) {
+      console.log('❌ Voice connection was destroyed, recreating...');
+      return searchMessage.edit('❌ Voice connection lost. Please use `t!join` again.');
+    }
+
+    queue.addSong(videoInfo);
+    console.log(`✅ Added to queue: ${videoInfo.title} (Position: ${queue.songs.length})`);
+
+    const embed = {
+      color: 0x0099ff,
+      title: '✅ Added to Queue',
+      description: `**${videoInfo.title}**`,
+      thumbnail: videoInfo.thumbnail ? { url: videoInfo.thumbnail } : undefined,
+      fields: [
+        { name: 'Position', value: `${queue.songs.length}`, inline: true },
+        { name: 'Duration', value: `${Math.floor(videoInfo.duration / 60)}:${(videoInfo.duration % 60).toString().padStart(2, '0')}`, inline: true },
+        { name: 'Requested by', value: message.author.username, inline: true }
+      ]
+    };
+
+    await searchMessage.edit({ content: '', embeds: [embed] });
+
+    // Start playing if not already playing
+    if (!queue.isPlaying) {
+      console.log('🎵 Starting playback (queue was empty)');
+      playMusic(message.guild.id);
+    } else {
+      console.log('🎵 Added to existing queue (already playing)');
+    }
+
+  } catch (error) {
+    console.error('❌ Error in play command:', error);
+    console.error('❌ Full error details:', error.stack);
+    
+    // More specific error messages
+    let errorMessage = '❌ Failed to play music. ';
+    
+    if (error.message.includes('Sign in to confirm')) {
+      errorMessage += 'YouTube requires sign-in. Please try a different song.';
+    } else if (error.message.includes('Video unavailable')) {
+      errorMessage += 'This video is unavailable or private.';
+    } else if (error.message.includes('timeout')) {
+      errorMessage += 'Request timed out. Please try again.';
+    } else {
+      errorMessage += 'Please try again or use a different song.';
+    }
+    
+    searchMessage.edit(errorMessage);
+  }
+}
 
   // Skip song
   if (message.content === 't!skip') {
