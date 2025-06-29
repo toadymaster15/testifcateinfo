@@ -287,7 +287,47 @@ discord.on("messageCreate", async (message) => {
 
     message.reply({ embeds: [embed] });
   }
-
+if (message.content.startsWith("t!ask ")) {
+    const question = message.content.slice(6).trim(); // Remove "t!ask " prefix
+    
+    if (!question) {
+      return message.reply("ASK ME A YES OR NO QUESTION. EXAMPLE. t!ask are your balls hairy");
+    }
+    
+    // Array of randomized responses
+    const responses = [
+      "yes",
+      "probably",
+      "idk",
+      "never",
+      "no",
+      "100% yes",
+      "definitely not",
+      "maybe",
+      "doubt it",
+      "most likely",
+      "fuck off",
+      "very unlikely"
+    ];
+    
+    // Pick a random response
+    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+    
+    console.log(`Ask command: "${question}" -> "${randomResponse}"`);
+    
+    // Create embed response
+    const embed = new EmbedBuilder()
+      .setTitle("bep bop getting info straight from APG and Testificate Man TM...")
+      .addFields(
+        { name: "Question:", value: question, inline: false },
+        { name: "Answer verified by Testificate Info ™:", value: `**${randomResponse}**`, inline: false }
+      )
+      .setColor(0x9932cc)
+      .setTimestamp()
+      .setFooter({ text: "TestificateInfo ™ 2025" });
+    
+    message.reply({ embeds: [embed] });
+  }
   // Original t!time command (keeping your existing implementation)
   if (message.content === "t!time") {
     console.log("🕐 Time command received");
