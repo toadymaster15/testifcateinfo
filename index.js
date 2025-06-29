@@ -71,10 +71,11 @@ async function pingWebhook(message) {
   }
 }
 
-// Music queue system
-const musicQueues = new Map();
-const processingCommands = new Set(); // Prevent duplicate command processing
+// FIXED: Better command processing to prevent duplicates
+const activeCommands = new Map(); // Track active commands per user
+const commandCooldowns = new Map(); // Cooldown system
 
+// FIXED: Simplified Music Queue System
 class MusicQueue {
   constructor() {
     this.songs = [];
@@ -82,6 +83,7 @@ class MusicQueue {
     this.currentSong = null;
     this.player = null;
     this.connection = null;
+    this.textChannel = null;
   }
 
   addSong(song) {
@@ -95,6 +97,12 @@ class MusicQueue {
   clear() {
     this.songs = [];
     this.currentSong = null;
+    this.isPlaying = false;
+    // FIXED: Properly clean up player
+    if (this.player) {
+      this.player.removeAllListeners();
+      this.player.stop();
+    }
   }
 
   isEmpty() {
@@ -102,22 +110,30 @@ class MusicQueue {
   }
 }
 
-// Get video info from YouTube with better error handling
+const musicQueues = new Map();
+
+// FIXED: Simplified video info function with better error handling
 async function getVideoInfo(query) {
   try {
+    console.log(`🔍 Searching for: ${query}`);
+    
     // Check if it's a YouTube URL
     if (ytdl.validateURL(query)) {
+      console.log('📺 Processing YouTube URL...');
       const info = await ytdl.getInfo(query);
       return {
         title: info.videoDetails.title,
         url: query,
         duration: parseInt(info.videoDetails.lengthSeconds),
-        thumbnail: info.videoDetails.thumbnails[0]?.url
+        thumbnail: info.videoDetails.thumbnails?.[0]?.url || null
       };
     } else {
       // Search for the video
+      console.log('🔍 Searching YouTube...');
       const searchResults = await ytSearch(query);
-      if (searchResults.videos.length === 0) {
+      
+      if (!searchResults.videos || searchResults.videos.length === 0) {
+        console.log('❌ No search results found');
         return null;
       }
 
@@ -125,21 +141,24 @@ async function getVideoInfo(query) {
       return {
         title: video.title,
         url: video.url,
-        duration: video.duration.seconds,
-        thumbnail: video.thumbnail
+        duration: video.duration?.seconds || 0,
+        thumbnail: video.thumbnail || null
       };
     }
   } catch (error) {
-    console.error('❌ Error getting video info:', error);
+    console.error('❌ Error getting video info:', error.message);
     return null;
   }
 }
 
-// Enhanced play music function with better error handling and fixed deafening
-async function playMusic(guildId, textChannel) {
+// FIXED: Much cleaner playMusic function
+async function playMusic(guildId) {
   const queue = musicQueues.get(guildId);
   if (!queue || queue.isEmpty()) {
-    if (queue) queue.isPlaying = false;
+    if (queue) {
+      queue.isPlaying = false;
+      console.log('🎵 Queue empty, stopping playback');
+    }
     return;
   }
 
@@ -150,37 +169,47 @@ async function playMusic(guildId, textChannel) {
   queue.isPlaying = true;
 
   try {
-    console.log(`🎵 Playing: ${song.title}`);
+    console.log(`🎵 Now playing: ${song.title}`);
     
-    // Create ytdl stream with optimized options for Render.com
+    // FIXED: Better ytdl stream options
     const stream = ytdl(song.url, {
       filter: 'audioonly',
       quality: 'lowestaudio',
-      highWaterMark: 1024 * 1024 * 16, // Optimized buffer for Render's resources
+      highWaterMark: 1024 * 512, // Reduced buffer size
       requestOptions: {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
       }
     });
 
-    // Create audio resource with proper settings to prevent deafening
     const resource = createAudioResource(stream, {
       inputType: 'arbitrary',
       inlineVolume: true
     });
 
-    // Set volume to prevent deafening (50% volume)
+    // Set reasonable volume
     if (resource.volume) {
-      resource.volume.setVolume(0.5);
+      resource.volume.setVolume(0.3);
     }
 
-    if (!queue.player) {
-      queue.player = createAudioPlayer();
-    }
+    // FIXED: Create new player for each song to avoid listener conflicts
+    queue.player = createAudioPlayer();
+    
+    // FIXED: Single event listener setup
+    queue.player.once(AudioPlayerStatus.Idle, () => {
+      console.log('🎵 Song finished');
+      // Small delay to prevent rapid-fire
+      setTimeout(() => playMusic(guildId), 500);
+    });
 
-    // Clean up previous player listeners to prevent duplicates
-    queue.player.removeAllListeners();
+    queue.player.once('error', (error) => {
+      console.error('❌ Player error:', error.message);
+      if (queue.textChannel) {
+        queue.textChannel.send('❌ Audio error, skipping song...').catch(console.error);
+      }
+      setTimeout(() => playMusic(guildId), 500);
+    });
 
     queue.player.play(resource);
 
@@ -188,44 +217,28 @@ async function playMusic(guildId, textChannel) {
       queue.connection.subscribe(queue.player);
     }
 
-    // Send now playing message only once
-    const nowPlayingEmbed = {
-      color: 0x00ff00,
-      title: '🎵 Now Playing',
-      description: `**${song.title}**`,
-      thumbnail: {
-        url: song.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg'
-      },
-      footer: {
-        text: `Duration: ${Math.floor(song.duration / 60)}:${(song.duration % 60).toString().padStart(2, '0')}`
-      }
-    };
-
-    textChannel.send({ embeds: [nowPlayingEmbed] }).catch(console.error);
-
-    // Handle player events (set only once)
-    queue.player.once(AudioPlayerStatus.Idle, () => {
-      console.log('🎵 Song finished, playing next...');
-      setTimeout(() => playMusic(guildId, textChannel), 1000); // Small delay to prevent rapid firing
-    });
-
-    queue.player.once('error', (error) => {
-      console.error('❌ Audio player error:', error);
-      textChannel.send('❌ Error playing audio. Skipping to next song...').catch(console.error);
-      setTimeout(() => playMusic(guildId, textChannel), 1000);
-    });
-
-    // Handle stream errors
-    stream.on('error', (error) => {
-      console.error('❌ Stream error:', error);
-      textChannel.send('❌ Error with audio stream. Skipping to next song...').catch(console.error);
-      setTimeout(() => playMusic(guildId, textChannel), 1000);
-    });
+    // Send now playing message
+    if (queue.textChannel) {
+      const embed = {
+        color: 0x00ff00,
+        title: '🎵 Now Playing',
+        description: `**${song.title}**`,
+        thumbnail: song.thumbnail ? { url: song.thumbnail } : undefined,
+        footer: {
+          text: `Duration: ${Math.floor(song.duration / 60)}:${(song.duration % 60).toString().padStart(2, '0')}`
+        }
+      };
+      
+      queue.textChannel.send({ embeds: [embed] }).catch(console.error);
+    }
 
   } catch (error) {
-    console.error('❌ Error playing music:', error);
-    textChannel.send(`❌ Error playing **${song.title}**. Skipping to next song...`).catch(console.error);
-    setTimeout(() => playMusic(guildId, textChannel), 1000);
+    console.error('❌ Error in playMusic:', error.message);
+    if (queue.textChannel) {
+      queue.textChannel.send(`❌ Failed to play: ${song.title}`).catch(console.error);
+    }
+    // Try next song
+    setTimeout(() => playMusic(guildId), 500);
   }
 }
 
@@ -280,15 +293,27 @@ discord.on('messageCreate', async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
 
-  // Prevent duplicate command processing
-  const commandKey = `${message.author.id}-${message.content}-${Date.now()}`;
-  if (processingCommands.has(commandKey)) return;
-  processingCommands.add(commandKey);
+  // FIXED: Better duplicate command prevention
+  const commandKey = `${message.author.id}-${message.content.split(' ')[0]}`;
+  const now = Date.now();
   
-  // Clean up old command keys after 5 seconds
-  setTimeout(() => processingCommands.delete(commandKey), 5000);
+  // Check if user is on cooldown for this command
+  if (commandCooldowns.has(commandKey)) {
+    const cooldownEnd = commandCooldowns.get(commandKey);
+    if (now < cooldownEnd) {
+      console.log(`⏳ User ${message.author.tag} on cooldown for ${message.content.split(' ')[0]}`);
+      return;
+    }
+  }
 
-  // EXISTING TIME COMMAND
+  // Set cooldown (1 second for most commands, 3 seconds for music)
+  const cooldownTime = message.content.startsWith('t!play') ? 3000 : 1000;
+  commandCooldowns.set(commandKey, now + cooldownTime);
+
+  // Clean up old cooldowns
+  setTimeout(() => commandCooldowns.delete(commandKey), cooldownTime);
+
+  // EXISTING TIME COMMAND (unchanged)
   if (message.content === 't!time') {
     console.log('🕐 Time command received');
 
@@ -357,17 +382,13 @@ discord.on('messageCreate', async (message) => {
     }
   }
 
-  // MUSIC COMMANDS
+  // FIXED MUSIC COMMANDS
 
-  // Join voice channel - Fixed deafening issue
+  // Join voice channel
   if (message.content === 't!join') {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
       return message.reply('❌ You need to be in a voice channel first!');
-    }
-
-    if (!voiceChannel.permissionsFor(discord.user).has(['Connect', 'Speak'])) {
-      return message.reply('❌ I need permission to connect and speak in that voice channel!');
     }
 
     try {
@@ -375,28 +396,27 @@ discord.on('messageCreate', async (message) => {
         channelId: voiceChannel.id,
         guildId: message.guild.id,
         adapterCreator: message.guild.voiceAdapterCreator,
-        selfDeaf: false, // This fixes the deafening issue!
+        selfDeaf: false,
         selfMute: false
       });
 
-      // Initialize music queue for this guild
-      if (!musicQueues.has(message.guild.id)) {
-        musicQueues.set(message.guild.id, new MusicQueue());
-      }
-
-      const queue = musicQueues.get(message.guild.id);
+      // Initialize music queue
+      const queue = new MusicQueue();
       queue.connection = connection;
+      queue.textChannel = message.channel;
+      musicQueues.set(message.guild.id, queue);
 
       connection.on(VoiceConnectionStatus.Ready, () => {
         console.log('✅ Voice connection ready');
-        message.reply(`✅ Joined **${voiceChannel.name}**! Use \`t!play <song>\` to play music!`);
+        message.reply(`✅ Joined **${voiceChannel.name}**!`);
       });
 
       connection.on(VoiceConnectionStatus.Disconnected, () => {
         console.log('❌ Voice connection disconnected');
+        const queue = musicQueues.get(message.guild.id);
         if (queue) {
           queue.clear();
-          queue.isPlaying = false;
+          musicQueues.delete(message.guild.id);
         }
       });
 
@@ -417,191 +437,160 @@ discord.on('messageCreate', async (message) => {
       connection.destroy();
       
       // Clean up music queue
-      if (musicQueues.has(message.guild.id)) {
-        const queue = musicQueues.get(message.guild.id);
-        if (queue.player) {
-          queue.player.removeAllListeners();
-          queue.player.stop();
-        }
+      const queue = musicQueues.get(message.guild.id);
+      if (queue) {
         queue.clear();
-        queue.isPlaying = false;
         musicQueues.delete(message.guild.id);
       }
 
-      message.reply('✅ Left the voice channel and cleared the music queue!');
+      message.reply('✅ Left the voice channel!');
     } catch (error) {
       console.error('❌ Error leaving voice channel:', error);
       message.reply('❌ Failed to leave voice channel.');
     }
   }
 
-  // Play music with enhanced error handling
+  // FIXED: Play music command
   if (message.content.startsWith('t!play ')) {
     const connection = getVoiceConnection(message.guild.id);
     if (!connection) {
-      return message.reply('❌ I need to be in a voice channel first! Use `t!join` to make me join your channel.');
+      return message.reply('❌ I need to be in a voice channel first! Use `t!join`');
     }
 
-    const query = message.content.slice(7).trim(); // Remove 't!play '
+    const query = message.content.slice(7).trim();
     if (!query) {
-      return message.reply('❌ Please provide a song name or YouTube URL!\nExample: `t!play Low Taper Gang`');
+      return message.reply('❌ Please provide a song name or YouTube URL!');
     }
 
-    const searchMessage = await message.reply('🔍 Searching for music...');
+    const searchMessage = await message.reply('🔍 Searching...');
 
     try {
       const videoInfo = await getVideoInfo(query);
       if (!videoInfo) {
-        return searchMessage.edit('❌ No music found for that search. Try a different query.');
+        return searchMessage.edit('❌ No results found!');
       }
 
-      // Check video duration (limit to 10 minutes to prevent abuse)
+      // Duration check
       if (videoInfo.duration > 600) {
-        return searchMessage.edit('❌ Song is too long! Please choose a song under 10 minutes.');
+        return searchMessage.edit('❌ Song too long! (Max 10 minutes)');
       }
 
-      // Get or create music queue
-      if (!musicQueues.has(message.guild.id)) {
-        musicQueues.set(message.guild.id, new MusicQueue());
+      // Get queue
+      let queue = musicQueues.get(message.guild.id);
+      if (!queue) {
+        queue = new MusicQueue();
+        queue.connection = connection;
+        queue.textChannel = message.channel;
+        musicQueues.set(message.guild.id, queue);
       }
 
-      const queue = musicQueues.get(message.guild.id);
-      queue.connection = connection;
       queue.addSong(videoInfo);
 
-      const addedEmbed = {
+      const embed = {
         color: 0x0099ff,
         title: '✅ Added to Queue',
         description: `**${videoInfo.title}**`,
-        thumbnail: {
-          url: videoInfo.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg'
-        },
+        thumbnail: videoInfo.thumbnail ? { url: videoInfo.thumbnail } : undefined,
         fields: [
-          {
-            name: 'Position in Queue',
-            value: `${queue.songs.length}`,
-            inline: true
-          },
-          {
-            name: 'Duration',
-            value: `${Math.floor(videoInfo.duration / 60)}:${(videoInfo.duration % 60).toString().padStart(2, '0')}`,
-            inline: true
-          }
+          { name: 'Position', value: `${queue.songs.length}`, inline: true },
+          { name: 'Duration', value: `${Math.floor(videoInfo.duration / 60)}:${(videoInfo.duration % 60).toString().padStart(2, '0')}`, inline: true }
         ]
       };
 
-      await searchMessage.edit({ content: '', embeds: [addedEmbed] });
+      await searchMessage.edit({ content: '', embeds: [embed] });
 
       // Start playing if not already playing
       if (!queue.isPlaying) {
-        playMusic(message.guild.id, message.channel);
+        playMusic(message.guild.id);
       }
 
     } catch (error) {
-      console.error('❌ Error playing music:', error);
-      searchMessage.edit('❌ Failed to play music. Please try again or use a different song.');
+      console.error('❌ Error in play command:', error);
+      searchMessage.edit('❌ Failed to play music. Try again!');
     }
   }
 
-  // Skip current song
+  // Skip song
   if (message.content === 't!skip') {
     const queue = musicQueues.get(message.guild.id);
     if (!queue || !queue.isPlaying) {
-      return message.reply('❌ No music is currently playing!');
+      return message.reply('❌ Nothing is playing!');
     }
 
     if (queue.player) {
       queue.player.stop();
-      message.reply('⏭️ Skipped current song!');
+      message.reply('⏭️ Skipped!');
     }
   }
 
-  // Stop music and clear queue
+  // Stop music
   if (message.content === 't!stop') {
     const queue = musicQueues.get(message.guild.id);
     if (!queue || !queue.isPlaying) {
-      return message.reply('❌ No music is currently playing!');
+      return message.reply('❌ Nothing is playing!');
     }
 
     queue.clear();
-    queue.isPlaying = false;
-    if (queue.player) {
-      queue.player.removeAllListeners();
-      queue.player.stop();
-    }
-
-    message.reply('⏹️ Stopped music and cleared the queue!');
+    message.reply('⏹️ Stopped music!');
   }
 
-  // Show current queue
+  // Show queue
   if (message.content === 't!queue') {
     const queue = musicQueues.get(message.guild.id);
     if (!queue || (queue.isEmpty() && !queue.currentSong)) {
-      return message.reply('❌ The music queue is empty!');
+      return message.reply('❌ Queue is empty!');
     }
 
-    let queueText = '';
+    let description = '';
     
     if (queue.currentSong) {
-      queueText += `**Now Playing:**\n🎵 ${queue.currentSong.title}\n\n`;
+      description += `**🎵 Now Playing:**\n${queue.currentSong.title}\n\n`;
     }
 
     if (!queue.isEmpty()) {
-      queueText += `**Up Next:**\n`;
-      queue.songs.slice(0, 10).forEach((song, index) => {
-        queueText += `${index + 1}. ${song.title}\n`;
+      description += `**📝 Up Next:**\n`;
+      queue.songs.slice(0, 5).forEach((song, index) => {
+        description += `${index + 1}. ${song.title}\n`;
       });
 
-      if (queue.songs.length > 10) {
-        queueText += `... and ${queue.songs.length - 10} more songs`;
+      if (queue.songs.length > 5) {
+        description += `... and ${queue.songs.length - 5} more`;
       }
     }
 
-    const queueEmbed = {
+    const embed = {
       color: 0x9932cc,
       title: '🎵 Music Queue',
-      description: queueText || 'Queue is empty',
-      footer: {
-        text: `Total songs in queue: ${queue.songs.length}`
-      }
+      description: description || 'Queue is empty',
+      footer: { text: `Total songs: ${queue.songs.length}` }
     };
 
-    message.reply({ embeds: [queueEmbed] });
+    message.reply({ embeds: [embed] });
   }
 
   // Help command
   if (message.content === 't!help') {
-    const helpEmbed = {
+    const embed = {
       color: 0x0099ff,
-      title: '🤖 TestificateInfo Bot Commands',
-      description: 'Here are all available commands:',
+      title: '🤖 TestificateInfo Bot',
       fields: [
         {
-          name: '🕐 Server Commands',
-          value: '`t!time` - Dzień na APG',
+          name: '🕐 Server',
+          value: '`t!time` - Check server day',
           inline: false
         },
         {
-          name: '🎵 Music Commands',
-          value: '`t!join` - Join your voice channel\n`t!leave` - Leave voice channel\n`t!play <song>` - Play music from YouTube\n`t!skip` - Skip current song\n`t!stop` - Stop music and clear queue\n`t!queue` - Show current music queue',
-          inline: false
-        },
-        {
-          name: '❓ Other Commands',
-          value: '`t!help` - Show this help message',
+          name: '🎵 Music',
+          value: '`t!join` - Join voice channel\n`t!leave` - Leave voice channel\n`t!play <song>` - Play music\n`t!skip` - Skip song\n`t!stop` - Stop music\n`t!queue` - Show queue',
           inline: false
         }
-      ],
-      footer: {
-        text: 'TestificateInfo Bot • You can use song names or YouTube URLs with t!play'
-      }
+      ]
     };
 
-    message.reply({ embeds: [helpEmbed] });
+    message.reply({ embeds: [embed] });
   }
 });
 
-// Initialize the bot
+// Initialize and start
 initializeBot();
-
 discord.login(process.env.DISCORD_TOKEN);
