@@ -37,6 +37,7 @@ app.listen(PORT, () => {
 
 // Webhook keep-alive function
 const WEBHOOK_URL = process.env.WEBHOOK; // Add this to your .env file
+const getEmoji = (name) => client.application.emojis.cache.find(e => e.name === name);
 
 async function pingWebhook(message) {
   if (!WEBHOOK_URL) {
@@ -291,7 +292,7 @@ discord.on("messageCreate", async (message) => {
     message.reply({ embeds: [embed] });
   }
   
-const getEmoji = (name) => client.application.emojis.cache.find(e => e.name === name);
+
   
   if (message.mentions.users.has(discord.user.id) && 
     message.content.toLowerCase().includes("is this true")) {
