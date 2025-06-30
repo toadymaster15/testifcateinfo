@@ -2,10 +2,24 @@ require("dotenv").config();
 const { Client: ExarotonClient } = require("exaroton");
 const { Client: DiscordClient, GatewayIntentBits, EmbedBuilder, AttachmentBuilder, ActivityType } = require("discord.js");
 const express = require("express");
-const puppeteer = require('puppeteer');
 
-
+// Import puppeteer properly at the top
+let puppeteer;
 let fetch;
+
+// Lazy load puppeteer only when needed
+async function loadPuppeteer() {
+  if (!puppeteer) {
+    try {
+      puppeteer = require('puppeteer');
+      console.log("✅ Puppeteer loaded successfully");
+    } catch (error) {
+      console.error("❌ Failed to load Puppeteer:", error.message);
+      throw new Error("Puppeteer not available");
+    }
+  }
+  return puppeteer;
+}
 
 // Create Express app for keep-alive
 const app = express();
@@ -49,13 +63,19 @@ const discord = new DiscordClient({
     GatewayIntentBits.MessageContent,
   ],
 });
+
 async function getCoinInfo(coinUrl) {
   let browser;
   try {
+    console.log("🚀 Loading Puppeteer for rugplay coin data...");
+    
+    // Load puppeteer dynamically
+    const puppeteerModule = await loadPuppeteer();
+    
     console.log("🚀 Launching browser for rugplay coin data...");
     
     // Render.com optimized browser launch options
-    browser = await puppeteer.launch({ 
+    browser = await puppeteerModule.launch({ 
       headless: 'new', // Use new headless mode
       args: [
         '--no-sandbox',
@@ -72,7 +92,11 @@ async function getCoinInfo(coinUrl) {
         '--disable-features=TranslateUI',
         '--disable-ipc-flooding-protection',
         '--disable-web-security',
-        '--disable-features=VizDisplayCompositor'
+        '--disable-features=VizDisplayCompositor',
+        '--disable-extensions',
+        '--disable-plugins',
+        '--disable-images', // Save bandwidth and memory
+        '--disable-javascript', // Only if the site works without JS
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       timeout: 30000
@@ -149,7 +173,11 @@ async function getCoinInfo(coinUrl) {
     throw error;
   } finally {
     if (browser) {
-      await browser.close();
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error("❌ Error closing browser:", closeError.message);
+      }
     }
   }
 }
@@ -396,7 +424,7 @@ discord.on("messageCreate", async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
 
-if (message.content.startsWith("t!coin ")) {
+  if (message.content.startsWith("t!coin ")) {
     const coinUrl = message.content.slice(7).trim(); // Remove "t!coin " prefix
     
     if (!coinUrl) {
@@ -446,7 +474,15 @@ if (message.content.startsWith("t!coin ")) {
       
     } catch (error) {
       console.error("❌ Error fetching coin data:", error.message);
-      await loadingMessage.edit("❌ Failed to fetch coin data. Make sure the URL is correct and the page is accessible!");
+      
+      // Provide more specific error messages
+      if (error.message.includes("Puppeteer not available")) {
+        await loadingMessage.edit("❌ Puppeteer is not available on this hosting platform. Coin tracking is temporarily disabled.");
+      } else if (error.message.includes("timeout")) {
+        await loadingMessage.edit("❌ Request timed out. The rugplay.com site might be slow or unreachable. Please try again later.");
+      } else {
+        await loadingMessage.edit("❌ Failed to fetch coin data. Make sure the URL is correct and the page is accessible!");
+      }
     }
   }
   
@@ -475,20 +511,20 @@ if (message.content.startsWith("t!coin ")) {
     }
   }
   
-if (message.content.toLowerCase().includes("massive")) {
-  console.log("M..M-MASSIVE?? EXECUTING ORDER 42143");
-  
-  try {
-    // Replace this URL with your actual Discord CDN image link
-    const massiveImageUrl = "https://cdn.discordapp.com/attachments/1387880532137869324/1389221393518039120/MASSIVELOWTAPRERFADE.png?ex=6863d4be&is=6862833e&hm=b26c3130ba502fd2467c5e1310fb015cc4e251152715aa63cfa0d614e8991e2f&";
+  if (message.content.toLowerCase().includes("massive")) {
+    console.log("M..M-MASSIVE?? EXECUTING ORDER 42143");
     
-    // Send the image (not as a reply, just a regular message)
-    await message.channel.send(massiveImageUrl);
-    
-  } catch (err) {
-    console.error("❌ Error sending massive image:", err.message);
+    try {
+      // Replace this URL with your actual Discord CDN image link
+      const massiveImageUrl = "https://cdn.discordapp.com/attachments/1387880532137869324/1389221393518039120/MASSIVELOWTAPRERFADE.png?ex=6863d4be&is=6862833e&hm=b26c3130ba502fd2467c5e1310fb015cc4e251152715aa63cfa0d614e8991e2f&";
+      
+      // Send the image (not as a reply, just a regular message)
+      await message.channel.send(massiveImageUrl);
+      
+    } catch (err) {
+      console.error("❌ Error sending massive image:", err.message);
+    }
   }
-}
   
   // t!help command - Show all available commands
   if (message.content === "t!help") {
@@ -501,6 +537,7 @@ if (message.content.toLowerCase().includes("massive")) {
         { name: "t!lancerstatus", value: "check up on lancer", inline: false },
         { name: "t!ask", value: "ask a yes or no question", inline: false },
         { name: "@TESTIFICATE MAN IS THIS TRUE?????", value: "simulate the feeling of being a chronically online twitter user", inline: false },
+        { name: "t!coin [rugplay URL]", value: "get coin data from rugplay.com", inline: false },
         { name: "t!help", value: "show dis mesage", inline: false }
       )
       .setTimestamp()
