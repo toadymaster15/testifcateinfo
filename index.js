@@ -2,28 +2,128 @@ require("dotenv").config();
 const { Client: ExarotonClient } = require("exaroton");
 const { Client: DiscordClient, GatewayIntentBits, EmbedBuilder, AttachmentBuilder, ActivityType } = require("discord.js");
 const express = require("express");
+const fs = require("fs");
+const path = require("path");
 
-// Import puppeteer properly at the top
-let puppeteer;
 let fetch;
-
-// Lazy load puppeteer only when needed
-async function loadPuppeteer() {
-  if (!puppeteer) {
-    try {
-      puppeteer = require('puppeteer');
-      console.log("✅ Puppeteer loaded successfully");
-    } catch (error) {
-      console.error("❌ Failed to load Puppeteer:", error.message);
-      throw new Error("Puppeteer not available");
-    }
-  }
-  return puppeteer;
-}
 
 // Create Express app for keep-alive
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// User data storage (in production, use a proper database)
+const DATA_FILE = path.join(__dirname, 'userdata.json');
+let userData = {};
+
+// Load user data on startup
+function loadUserData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = fs.readFileSync(DATA_FILE, 'utf8');
+      userData = JSON.parse(data);
+      console.log(`✅ Loaded user data for ${Object.keys(userData).length} users`);
+    } else {
+      userData = {};
+      console.log("📁 No existing user data file, starting fresh");
+    }
+  } catch (error) {
+    console.error("❌ Error loading user data:", error.message);
+    userData = {};
+  }
+}
+
+// Save user data
+function saveUserData() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2));
+  } catch (error) {
+    console.error("❌ Error saving user data:", error.message);
+  }
+}
+
+// Get or create user data
+function getUser(userId) {
+  if (!userData[userId]) {
+    userData[userId] = {
+      balance: 1000, // Starting balance
+      totalWon: 0,
+      totalLost: 0,
+      gamesPlayed: 0,
+      lastDaily: 0
+    };
+    saveUserData();
+  }
+  return userData[userId];
+}
+
+// Update user balance
+function updateBalance(userId, amount) {
+  const user = getUser(userId);
+  user.balance += amount;
+  if (amount > 0) user.totalWon += amount;
+  if (amount < 0) user.totalLost += Math.abs(amount);
+  user.gamesPlayed++;
+  saveUserData();
+  return user.balance;
+}
+
+// Gambling scenarios with different odds and payouts
+const gamblingScenarios = [
+  {
+    id: 1,
+    name: "Coin Flip",
+    description: "heads... or tails...",
+    options: ["Heads", "Tails"],
+    winChance: 50,
+    payout: 2.0,
+    emoji: "🪙"
+  },
+  {
+    id: 2,
+    name: "Dice Roll",
+    description: "Bet on high (4-6) or low (1-3)",
+    options: ["High (4-6)", "Low (1-3)"],
+    winChance: 50,
+    payout: 2.0,
+    emoji: "🎲"
+  },
+  {
+    id: 3,
+    name: "Lucky Number",
+    description: "Pick a number 1-10",
+    options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    winChance: 10,
+    payout: 9.0,
+    emoji: "🔢"
+  },
+  {
+    id: 4,
+    name: "Fate",
+    description: "Bet on Villager #21's fate",
+    options: ["kill", "pit of death", "penetration 3000", "enslave"],
+    winChance: 25,
+    payout: 3.5,
+    emoji: `${getEmoji('villager21')}`
+  },
+  {
+    id: 5,
+    name: "Slot Machine",
+    description: "Three matching symbols",
+    options: ["🍒 Cherry", "🍋 Lemon", "🍊 Orange", "🍇 Grape", "💎 Diamond"],
+    winChance: 20,
+    payout: 4.5,
+    emoji: "🎰"
+  },
+  {
+    id: 6,
+    name: "lancer roulette",
+    description: "hide from daddy lancer",
+    options: ["closet", "Testificate Disguise TM", "dont hide i will outgoon him", "tree", "lancer's bed dedicated for his motorcycle TM", "toilet"],
+    winChance: 83.33,
+    payout: 1.2,
+    emoji: `${getEmoji('lancer')}`
+  }
+];
 
 // Keep-alive endpoint
 app.get("/", (req, res) => {
@@ -51,6 +151,9 @@ app.listen(PORT, () => {
   console.log(`🌐 Keep-alive server running on port ${PORT}`);
 });
 
+// Load user data on startup
+loadUserData();
+
 // Webhook keep-alive function
 const WEBHOOK_URL = process.env.WEBHOOK; // Add this to your .env file
 
@@ -63,124 +166,6 @@ const discord = new DiscordClient({
     GatewayIntentBits.MessageContent,
   ],
 });
-
-async function getCoinInfo(coinUrl) {
-  let browser;
-  try {
-    console.log("🚀 Loading Puppeteer for rugplay coin data...");
-    
-    // Load puppeteer dynamically
-    const puppeteerModule = await loadPuppeteer();
-    
-    console.log("🚀 Launching browser for rugplay coin data...");
-    
-    // Render.com optimized browser launch options
-    browser = await puppeteerModule.launch({ 
-      headless: 'new', // Use new headless mode
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', // Important for Render.com
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process', // Important for memory constraints
-        '--disable-gpu',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-        '--disable-extensions',
-        '--disable-plugins',
-        '--disable-images', // Save bandwidth and memory
-        '--disable-javascript', // Only if the site works without JS
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      timeout: 30000
-    });
-    
-    const page = await browser.newPage();
-    
-    // Optimize for Render.com's memory limits
-    await page.setViewport({ width: 1280, height: 720 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    // Set timeouts for Render.com
-    page.setDefaultNavigationTimeout(30000);
-    page.setDefaultTimeout(30000);
-    
-    console.log(`📊 Navigating to: ${coinUrl}`);
-    await page.goto(coinUrl, { 
-      waitUntil: 'networkidle2', 
-      timeout: 30000 
-    });
-    
-    // Wait a bit for any dynamic content to load
-    await page.waitForTimeout(3000);
-    
-    // Try to extract coin data - adjust these selectors based on rugplay's actual HTML structure
-    const coinData = await page.evaluate(() => {
-      // These selectors are examples - you'll need to inspect rugplay.com to get the real ones
-      const priceElement = document.querySelector('.price, .coin-price, [data-price]');
-      const nameElement = document.querySelector('.coin-name, .token-name, h1');
-      const marketCapElement = document.querySelector('.market-cap, .mcap, [data-mcap]');
-      const changeElement = document.querySelector('.price-change, .change, [data-change]');
-      
-      return {
-        price: priceElement ? priceElement.textContent.trim() : 'N/A',
-        name: nameElement ? nameElement.textContent.trim() : 'Unknown Coin',
-        marketCap: marketCapElement ? marketCapElement.textContent.trim() : 'N/A',
-        change: changeElement ? changeElement.textContent.trim() : 'N/A'
-      };
-    });
-    
-    // Take a screenshot of the chart area
-    console.log("📸 Taking screenshot of chart...");
-    let screenshot = null;
-    try {
-      // Try to find and screenshot the chart - adjust selector based on rugplay's actual structure
-      const chartElement = await page.$('.chart, .trading-chart, .price-chart, canvas');
-      if (chartElement) {
-        screenshot = await chartElement.screenshot({ 
-          type: 'png',
-          quality: 80, // Reduce quality to save memory
-        });
-      } else {
-        // Fallback: screenshot a portion of the page to save memory
-        screenshot = await page.screenshot({ 
-          type: 'png', 
-          fullPage: false,
-          quality: 80,
-          clip: { x: 0, y: 0, width: 1280, height: 720 }
-        });
-      }
-    } catch (screenshotErr) {
-      console.log("⚠️ Could not take chart screenshot:", screenshotErr.message);
-      // Don't fail the entire function if screenshot fails
-      screenshot = null;
-    }
-    
-    return {
-      data: coinData,
-      screenshot: screenshot
-    };
-    
-  } catch (error) {
-    console.error("❌ Error getting coin info:", error.message);
-    throw error;
-  } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error("❌ Error closing browser:", closeError.message);
-      }
-    }
-  }
-}
 
 // Fixed getEmoji function - now references application emojis from Discord Developer Portal
 const getEmoji = (name) => {
@@ -424,68 +409,190 @@ discord.on("messageCreate", async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
 
-  if (message.content.startsWith("t!coin ")) {
-    const coinUrl = message.content.slice(7).trim(); // Remove "t!coin " prefix
-    
-    if (!coinUrl) {
-      return message.reply("Please provide a rugplay.com coin URL! Example: `t!coin https://rugplay.com/your-coin-page`");
-    }
-    
-    // Validate it's a rugplay URL
-    if (!coinUrl.includes("rugplay.com")) {
-      return message.reply("❌ Please provide a valid rugplay.com URL!");
-    }
-    
-    console.log(`💰 Coin tracking request for: ${coinUrl}`);
-    
-    // Send initial "loading" message
-    const loadingMessage = await message.reply("🔍 Fetching your rugplay coin data... This might take a moment!");
-    
-    try {
-      const coinInfo = await getCoinInfo(coinUrl);
-      
-      // Create Discord embed
-      const embed = new EmbedBuilder()
-        .setTitle(`💰 ${coinInfo.data.name}`)
-        .setDescription("Live data from rugplay.com")
-        .addFields(
-          { name: "💵 Price", value: coinInfo.data.price, inline: true },
-          { name: "📊 Market Cap", value: coinInfo.data.marketCap, inline: true },
-          { name: "📈 24h Change", value: coinInfo.data.change, inline: true }
-        )
-        .setColor(0x00ff88)
-        .setTimestamp()
-        .setFooter({ text: "TestificateInfo Bot • Rugplay Tracker" });
-      
-      // Attach screenshot if we got one
-      let files = [];
-      if (coinInfo.screenshot) {
-        const attachment = new AttachmentBuilder(coinInfo.screenshot, { name: 'coin-chart.png' });
-        embed.setImage('attachment://coin-chart.png');
-        files.push(attachment);
-      }
-      
-      // Edit the loading message with the results
-      await loadingMessage.edit({
-        content: null,
-        embeds: [embed],
-        files: files
-      });
-      
-    } catch (error) {
-      console.error("❌ Error fetching coin data:", error.message);
-      
-      // Provide more specific error messages
-      if (error.message.includes("Puppeteer not available")) {
-        await loadingMessage.edit("❌ Puppeteer is not available on this hosting platform. Coin tracking is temporarily disabled.");
-      } else if (error.message.includes("timeout")) {
-        await loadingMessage.edit("❌ Request timed out. The rugplay.com site might be slow or unreachable. Please try again later.");
-      } else {
-        await loadingMessage.edit("❌ Failed to fetch coin data. Make sure the URL is correct and the page is accessible!");
-      }
-    }
-  }
+  // t!balance - Check user balance
+ if (message.content === "t!balance" || message.content === "t!bal") {
+  const user = await getUser(message.author.id);
+  if (!user) return message.reply("❌ Error accessing your account!");
   
+  const embed = new EmbedBuilder()
+    .setTitle("apg wallet 3000")
+    .setColor(0xffd700)
+    .addFields(
+      { name: "Current Balance", value: `${getEmoji('VIPCOIN')} **${user.balance.toLocaleString()}** VIPCOIN Stock`, inline: false },
+      { name: "Games Played", value: `${user.gamesPlayed}`, inline: true },
+      { name: "Total Won", value: `${user.totalWon.toLocaleString()}`, inline: true },
+      { name: "Total Lost", value: `${user.totalLost.toLocaleString()}`, inline: true }
+    )
+    .setTimestamp()
+    .setFooter({ text: "villager #21's casino" });
+  
+  message.reply({ embeds: [embed] });
+}
+
+  // t!daily - Daily free coins
+  if (message.content === "t!daily") {
+    const user = getUser(message.author.id);
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    
+    if (now - user.lastDaily < oneDay) {
+      const timeLeft = oneDay - (now - user.lastDaily);
+      const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+      const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+      
+      return message.reply(`⏰ You already claimed your daily stock! Come back in **${hoursLeft}h ${minutesLeft}m**.`);
+    }
+    
+    const dailyAmount = 500;
+    user.balance += dailyAmount;
+    user.lastDaily = now;
+    saveUserData();
+    
+    const embed = new EmbedBuilder()
+      .setTitle("🎁 Daily Reward Claimed!")
+      .setDescription(`You received **${dailyAmount}** VIPCOINS!`)
+      .setColor(0x00ff00)
+      .addFields(
+        { name: "New Balance", value: `${getEmoji('VIPCOIN')} **${user.balance.toLocaleString()}** VIPCOINS`, inline: false }
+      )
+      .setTimestamp()
+      .setFooter({ text: "Come back tomorrow for more!" });
+    
+    message.reply({ embeds: [embed] });
+  }
+
+  // t!gamble - Show gambling scenarios
+  if (message.content === "t!gamble") {
+    const embed = new EmbedBuilder()
+      .setTitle(`${getEmoji('villager21')} villager #21's casino`)
+      .setDescription("pick a gamble thinge. higher risk, higher reward!!")
+      .setColor(0xff6b6b);
+    
+    gamblingScenarios.forEach(scenario => {
+      embed.addFields({
+        name: `${scenario.emoji} ${scenario.name} (Scenario ${scenario.id})`,
+        value: `${scenario.description}\n**Win Chance:** ${scenario.winChance}% | **Payout:** ${scenario.payout}x\n*Usage:* \`t!bet ${scenario.id} [amount] [choice]\``,
+        inline: false
+      });
+    });
+    
+    embed.addFields({
+      name: "💡 How to Play",
+      value: "Use `t!bet [scenario] [amount] [choice]`\nExample: `t!bet 1 100 Heads`\nCheck your balance with `t!balance`\nGet daily stock with `t!daily`",
+      inline: false
+    });
+    
+    message.reply({ embeds: [embed] });
+  }
+
+  // t!bet [scenario] [amount] [choice] - Place a bet
+  if (message.content.startsWith("t!bet ")) {
+    const args = message.content.slice(6).trim().split(' ');
+    
+    if (args.length < 3) {
+      return message.reply("❌ Usage: `t!bet [scenario] [amount] [choice]`\nExample: `t!bet 1 100 Heads`\nUse `t!gamble` to see all scenarios.");
+    }
+    
+    const scenarioId = parseInt(args[0]);
+    const betAmount = parseInt(args[1]);
+    const userChoice = args.slice(2).join(' ');
+    
+    // Validate scenario
+    const scenario = gamblingScenarios.find(s => s.id === scenarioId);
+    if (!scenario) {
+      return message.reply("❌ Invalid scenario! Use `t!gamble` to see available scenarios (1-6).");
+    }
+    
+    // Validate bet amount
+    if (isNaN(betAmount) || betAmount < 1) {
+      return message.reply("❌ Invalid bet amount! Must be a positive number.");
+    }
+    
+    // Check user balance
+    const user = getUser(message.author.id);
+    if (user.balance < betAmount) {
+      return message.reply(`❌ Insufficient funds! You have **${user.balance.toLocaleString()}** coins but tried to bet **${betAmount.toLocaleString()}**.`);
+    }
+    
+    // Validate choice
+    const validChoice = scenario.options.find(option => 
+      option.toLowerCase().includes(userChoice.toLowerCase()) || 
+      userChoice.toLowerCase().includes(option.toLowerCase())
+    );
+    
+    if (!validChoice) {
+      return message.reply(`❌ Invalid choice for ${scenario.name}!\nValid options: ${scenario.options.join(', ')}`);
+    }
+    
+    // Execute the gamble
+    const isWin = Math.random() * 100 < scenario.winChance;
+    const winAmount = Math.floor(betAmount * scenario.payout);
+    
+    let resultMessage = "";
+    let resultColor = 0xff0000;
+    
+    if (isWin) {
+      updateBalance(message.author.id, winAmount - betAmount);
+      resultMessage = `🎉 **YOU WON!** You won **${(winAmount - betAmount).toLocaleString()}** coins!`;
+      resultColor = 0x00ff00;
+    } else {
+      updateBalance(message.author.id, -betAmount);
+      resultMessage = `💸 **YOU LOST!** You lost **${betAmount.toLocaleString()}** coins.`;
+    }
+    
+    // Generate result based on scenario
+    let outcomeDescription = "";
+    switch (scenario.id) {
+      case 1: // Coin Flip
+        const coinResult = Math.random() < 0.5 ? "Heads" : "Tails";
+        outcomeDescription = `${getEmoji('VIPCOIN')} the coin landed on... **${coinResult}**!`;
+        break;
+      case 2: // Dice Roll
+        const diceNum = Math.floor(Math.random() * 6) + 1;
+        const diceCategory = diceNum >= 4 ? "High (4-6)" : "Low (1-3)";
+        outcomeDescription = `🎲 you rolled a... **${diceNum}** (${diceCategory})!`;
+        break;
+      case 3: // Lucky Number
+        const luckyNum = Math.floor(Math.random() * 10) + 1;
+        outcomeDescription = `🔢 The lucky number was **${luckyNum}**!`;
+        break;
+      case 4: // Color Wheel
+        const colors = ["kill", "pit of death", "penetration 3000", "enslave"];
+        const wheelResult = colors[Math.floor(Math.random() * colors.length)];
+        outcomeDescription = `villager #21 is be **${wheelResult}**!`;
+        break;
+      case 5: // Slot Machine
+        const symbols = ["🍒", "🍋", "🍊", "🍇", "💎"];
+        const slot1 = symbols[Math.floor(Math.random() * symbols.length)];
+        const slot2 = symbols[Math.floor(Math.random() * symbols.length)];
+        const slot3 = symbols[Math.floor(Math.random() * symbols.length)];
+        outcomeDescription = `🎰 Slots: ${slot1} ${slot2} ${slot3}`;
+        break;
+      case 6: // Russian Roulette
+        const chamber = Math.floor(Math.random() * 6) + 1;
+        const isBullet = Math.random() < (1/6);
+        outcomeDescription = `you chose: ${chamber}: ${isBullet ? "AHHHHHHHHHHHHHHHHHHHHHH 🗿🗿🗿🗿🗿🗿☠️☠️💀🔥🔥 BRO IS COOKED 🙏🙏🙏☠️☠️ DADDY LANCER FOUND YOU... 🤫🤫🤫💀🗿🗿🗿🗿🙏🔥🙏☠️☠️" : "daddy lancer couldn't find you..."}`;
+        break;
+    }
+    
+    const newBalance = getUser(message.author.id).balance;
+    
+    const embed = new EmbedBuilder()
+      .setTitle(`${scenario.emoji} ${scenario.name} - Bet Results`)
+      .setDescription(outcomeDescription)
+      .setColor(resultColor)
+      .addFields(
+        { name: "Your Choice", value: userChoice, inline: true },
+        { name: "Bet Amount", value: `${betAmount.toLocaleString()} coins`, inline: true },
+        { name: "Result", value: resultMessage, inline: false },
+        { name: "New Balance", value: `${getEmoji('VIPCOIN')} **${newBalance.toLocaleString()}** VIPCOIN Stock`, inline: false }
+      )
+      .setTimestamp()
+      .setFooter({ text: "villager 21's casino" });
+    
+    message.reply({ embeds: [embed] });
+  }
+
   // t!lancerstatus command
   if (message.content === "t!lancerstatus") {
     console.log("🐎 Lancer status command received");
@@ -511,20 +618,20 @@ discord.on("messageCreate", async (message) => {
     }
   }
   
-  if (message.content.toLowerCase().includes("massive")) {
-    console.log("M..M-MASSIVE?? EXECUTING ORDER 42143");
+if (message.content.toLowerCase().includes("massive")) {
+  console.log("M..M-MASSIVE?? EXECUTING ORDER 42143");
+  
+  try {
+    // Replace this URL with your actual Discord CDN image link
+    const massiveImageUrl = "https://cdn.discordapp.com/attachments/1387880532137869324/1389221393518039120/MASSIVELOWTAPRERFADE.png?ex=6863d4be&is=6862833e&hm=b26c3130ba502fd2467c5e1310fb015cc4e251152715aa63cfa0d614e8991e2f&";
     
-    try {
-      // Replace this URL with your actual Discord CDN image link
-      const massiveImageUrl = "https://cdn.discordapp.com/attachments/1387880532137869324/1389221393518039120/MASSIVELOWTAPRERFADE.png?ex=6863d4be&is=6862833e&hm=b26c3130ba502fd2467c5e1310fb015cc4e251152715aa63cfa0d614e8991e2f&";
-      
-      // Send the image (not as a reply, just a regular message)
-      await message.channel.send(massiveImageUrl);
-      
-    } catch (err) {
-      console.error("❌ Error sending massive image:", err.message);
-    }
+    // Send the image (not as a reply, just a regular message)
+    await message.channel.send(massiveImageUrl);
+    
+  } catch (err) {
+    console.error("❌ Error sending massive image:", err.message);
   }
+}
   
   // t!help command - Show all available commands
   if (message.content === "t!help") {
@@ -537,7 +644,6 @@ discord.on("messageCreate", async (message) => {
         { name: "t!lancerstatus", value: "check up on lancer", inline: false },
         { name: "t!ask", value: "ask a yes or no question", inline: false },
         { name: "@TESTIFICATE MAN IS THIS TRUE?????", value: "simulate the feeling of being a chronically online twitter user", inline: false },
-        { name: "t!coin [rugplay URL]", value: "get coin data from rugplay.com", inline: false },
         { name: "t!help", value: "show dis mesage", inline: false }
       )
       .setTimestamp()
