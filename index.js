@@ -573,7 +573,7 @@ discord.on("messageCreate", async (message) => {
       case 6: // Russian Roulette
         const chamber = Math.floor(Math.random() * 6) + 1;
         const isBullet = Math.random() < (1/6);
-        outcomeDescription = `you chose: ${chamber}: ${isBullet ? "AHHHHHHHHHHHHHHHHHHHHHH 🗿🗿🗿🗿🗿🗿☠️☠️💀🔥🔥 BRO IS COOKED 🙏🙏🙏☠️☠️ DADDY LANCER FOUND YOU... 🤫🤫🤫💀🗿🗿🗿🗿🙏🔥🙏☠️☠️" : "daddy lancer couldn't find you..."}`;
+        outcomeDescription = `daddy lancer was in: ${chamber}: ${isBullet ? "AHHHHHHHHHHHHHHHHHHHHHH 🗿🗿🗿🗿🗿🗿☠️☠️💀🔥🔥 BRO IS COOKED 🙏🙏🙏☠️☠️ DADDY LANCER FOUND YOU... 🤫🤫🤫💀🗿🗿🗿🗿🙏🔥🙏☠️☠️" : "daddy lancer couldn't find you..."}`;
         break;
     }
     
