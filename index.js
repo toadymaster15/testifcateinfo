@@ -15,6 +15,29 @@ const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'userdata.json');
 let userData = {};
 
+const getEmoji = (name) => {
+  try {
+    // Check if bot is ready and application is available
+    if (!discord.user || !discord.application) {
+      console.log(`⚠️ Bot not ready or application not available for emoji: ${name}`);
+      return name;
+    }
+    
+    // Try to find the emoji in application emojis
+    const emoji = discord.application.emojis?.cache?.find(e => e.name === name);
+    if (emoji) {
+      console.log(`✅ Found application emoji: ${name} -> ${emoji.toString()}`);
+      return emoji.toString();
+    }
+    
+    console.log(`⚠️ Application emoji not found: ${name}`);
+    return name;
+  } catch (error) {
+    console.error(`❌ Error getting emoji ${name}:`, error.message);
+    return name;
+  }
+};
+
 // Load user data on startup
 function loadUserData() {
   try {
@@ -168,28 +191,7 @@ const discord = new DiscordClient({
 });
 
 // Fixed getEmoji function - now references application emojis from Discord Developer Portal
-const getEmoji = (name) => {
-  try {
-    // Check if bot is ready and application is available
-    if (!discord.user || !discord.application) {
-      console.log(`⚠️ Bot not ready or application not available for emoji: ${name}`);
-      return name;
-    }
-    
-    // Try to find the emoji in application emojis
-    const emoji = discord.application.emojis?.cache?.find(e => e.name === name);
-    if (emoji) {
-      console.log(`✅ Found application emoji: ${name} -> ${emoji.toString()}`);
-      return emoji.toString();
-    }
-    
-    console.log(`⚠️ Application emoji not found: ${name}`);
-    return name;
-  } catch (error) {
-    console.error(`❌ Error getting emoji ${name}:`, error.message);
-    return name;
-  }
-};
+
 
 async function pingWebhook(message) {
   if (!WEBHOOK_URL) {
