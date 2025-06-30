@@ -314,7 +314,22 @@ discord.on("messageCreate", async (message) => {
       message.reply("**LANCER STATUS: ALIVE** (but image failed to load)");
     }
   }
-
+  
+if (message.content.toLowerCase().includes("massive")) {
+  console.log("M..M-MASSIVE?? EXECUTING ORDER 42143");
+  
+  try {
+    // Replace this URL with your actual Discord CDN image link
+    const massiveImageUrl = "https://cdn.discordapp.com/attachments/1387880532137869324/1389221393518039120/MASSIVELOWTAPRERFADE.png?ex=6863d4be&is=6862833e&hm=b26c3130ba502fd2467c5e1310fb015cc4e251152715aa63cfa0d614e8991e2f&";
+    
+    // Send the image (not as a reply, just a regular message)
+    await message.channel.send(massiveImageUrl);
+    
+  } catch (err) {
+    console.error("❌ Error sending massive image:", err.message);
+  }
+}
+  
   // t!help command - Show all available commands
   if (message.content === "t!help") {
     const embed = new EmbedBuilder()
