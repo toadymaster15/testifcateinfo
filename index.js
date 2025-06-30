@@ -47,6 +47,71 @@ const discord = new DiscordClient({
     GatewayIntentBits.MessageContent,
   ],
 });
+async function getCoinInfo(coinUrl) {
+  let browser;
+  try {
+    console.log("🚀 Launching browser for rugplay coin data...");
+    browser = await puppeteer.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Required for some hosting environments
+    });
+    
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 720 });
+    
+    console.log(`📊 Navigating to: ${coinUrl}`);
+    await page.goto(coinUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    
+    // Wait a bit for any dynamic content to load
+    await page.waitForTimeout(2000);
+    
+    // Try to extract coin data - you'll need to adjust these selectors based on rugplay's actual HTML structure
+    const coinData = await page.evaluate(() => {
+      // These selectors are examples - you'll need to inspect rugplay.com to get the real ones
+      const priceElement = document.querySelector('.price, .coin-price, [data-price]');
+      const nameElement = document.querySelector('.coin-name, .token-name, h1');
+      const marketCapElement = document.querySelector('.market-cap, .mcap, [data-mcap]');
+      const changeElement = document.querySelector('.price-change, .change, [data-change]');
+      
+      return {
+        price: priceElement ? priceElement.textContent.trim() : 'N/A',
+        name: nameElement ? nameElement.textContent.trim() : 'Unknown Coin',
+        marketCap: marketCapElement ? marketCapElement.textContent.trim() : 'N/A',
+        change: changeElement ? changeElement.textContent.trim() : 'N/A'
+      };
+    });
+    
+    // Take a screenshot of the chart area (adjust selector as needed)
+    console.log("📸 Taking screenshot of chart...");
+    let screenshot = null;
+    try {
+      // Try to find and screenshot the chart - adjust selector based on rugplay's actual structure
+      const chartElement = await page.$('.chart, .trading-chart, .price-chart, canvas');
+      if (chartElement) {
+        screenshot = await chartElement.screenshot({ type: 'png' });
+      } else {
+        // Fallback: screenshot the entire page
+        screenshot = await page.screenshot({ type: 'png', fullPage: false });
+      }
+    } catch (screenshotErr) {
+      console.log("⚠️ Could not take chart screenshot, taking full page screenshot");
+      screenshot = await page.screenshot({ type: 'png', fullPage: false });
+    }
+    
+    return {
+      data: coinData,
+      screenshot: screenshot
+    };
+    
+  } catch (error) {
+    console.error("❌ Error getting coin info:", error.message);
+    throw error;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
 
 // Fixed getEmoji function - now references application emojis from Discord Developer Portal
 const getEmoji = (name) => {
@@ -290,6 +355,60 @@ discord.on("messageCreate", async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
 
+if (message.content.startsWith("t!coin ")) {
+    const coinUrl = message.content.slice(7).trim(); // Remove "t!coin " prefix
+    
+    if (!coinUrl) {
+      return message.reply("Please provide a rugplay.com coin URL! Example: `t!coin https://rugplay.com/your-coin-page`");
+    }
+    
+    // Validate it's a rugplay URL
+    if (!coinUrl.includes("rugplay.com")) {
+      return message.reply("❌ Please provide a valid rugplay.com URL!");
+    }
+    
+    console.log(`💰 Coin tracking request for: ${coinUrl}`);
+    
+    // Send initial "loading" message
+    const loadingMessage = await message.reply("🔍 Fetching your rugplay coin data... This might take a moment!");
+    
+    try {
+      const coinInfo = await getCoinInfo(coinUrl);
+      
+      // Create Discord embed
+      const embed = new EmbedBuilder()
+        .setTitle(`💰 ${coinInfo.data.name}`)
+        .setDescription("Live data from rugplay.com")
+        .addFields(
+          { name: "💵 Price", value: coinInfo.data.price, inline: true },
+          { name: "📊 Market Cap", value: coinInfo.data.marketCap, inline: true },
+          { name: "📈 24h Change", value: coinInfo.data.change, inline: true }
+        )
+        .setColor(0x00ff88)
+        .setTimestamp()
+        .setFooter({ text: "TestificateInfo Bot • Rugplay Tracker" });
+      
+      // Attach screenshot if we got one
+      let files = [];
+      if (coinInfo.screenshot) {
+        const attachment = new AttachmentBuilder(coinInfo.screenshot, { name: 'coin-chart.png' });
+        embed.setImage('attachment://coin-chart.png');
+        files.push(attachment);
+      }
+      
+      // Edit the loading message with the results
+      await loadingMessage.edit({
+        content: null,
+        embeds: [embed],
+        files: files
+      });
+      
+    } catch (error) {
+      console.error("❌ Error fetching coin data:", error.message);
+      await loadingMessage.edit("❌ Failed to fetch coin data. Make sure the URL is correct and the page is accessible!");
+    }
+  }
+  
   // t!lancerstatus command
   if (message.content === "t!lancerstatus") {
     console.log("🐎 Lancer status command received");
