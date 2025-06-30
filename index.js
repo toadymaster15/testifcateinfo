@@ -2,6 +2,8 @@ require("dotenv").config();
 const { Client: ExarotonClient } = require("exaroton");
 const { Client: DiscordClient, GatewayIntentBits, EmbedBuilder, AttachmentBuilder, ActivityType } = require("discord.js");
 const express = require("express");
+const puppeteer = require('puppeteer');
+
 
 let fetch;
 
@@ -51,21 +53,51 @@ async function getCoinInfo(coinUrl) {
   let browser;
   try {
     console.log("🚀 Launching browser for rugplay coin data...");
+    
+    // Render.com optimized browser launch options
     browser = await puppeteer.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Required for some hosting environments
+      headless: 'new', // Use new headless mode
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage', // Important for Render.com
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process', // Important for memory constraints
+        '--disable-gpu',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor'
+      ],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      timeout: 30000
     });
     
     const page = await browser.newPage();
+    
+    // Optimize for Render.com's memory limits
     await page.setViewport({ width: 1280, height: 720 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    // Set timeouts for Render.com
+    page.setDefaultNavigationTimeout(30000);
+    page.setDefaultTimeout(30000);
     
     console.log(`📊 Navigating to: ${coinUrl}`);
-    await page.goto(coinUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(coinUrl, { 
+      waitUntil: 'networkidle2', 
+      timeout: 30000 
+    });
     
     // Wait a bit for any dynamic content to load
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
     
-    // Try to extract coin data - you'll need to adjust these selectors based on rugplay's actual HTML structure
+    // Try to extract coin data - adjust these selectors based on rugplay's actual HTML structure
     const coinData = await page.evaluate(() => {
       // These selectors are examples - you'll need to inspect rugplay.com to get the real ones
       const priceElement = document.querySelector('.price, .coin-price, [data-price]');
@@ -81,21 +113,30 @@ async function getCoinInfo(coinUrl) {
       };
     });
     
-    // Take a screenshot of the chart area (adjust selector as needed)
+    // Take a screenshot of the chart area
     console.log("📸 Taking screenshot of chart...");
     let screenshot = null;
     try {
       // Try to find and screenshot the chart - adjust selector based on rugplay's actual structure
       const chartElement = await page.$('.chart, .trading-chart, .price-chart, canvas');
       if (chartElement) {
-        screenshot = await chartElement.screenshot({ type: 'png' });
+        screenshot = await chartElement.screenshot({ 
+          type: 'png',
+          quality: 80, // Reduce quality to save memory
+        });
       } else {
-        // Fallback: screenshot the entire page
-        screenshot = await page.screenshot({ type: 'png', fullPage: false });
+        // Fallback: screenshot a portion of the page to save memory
+        screenshot = await page.screenshot({ 
+          type: 'png', 
+          fullPage: false,
+          quality: 80,
+          clip: { x: 0, y: 0, width: 1280, height: 720 }
+        });
       }
     } catch (screenshotErr) {
-      console.log("⚠️ Could not take chart screenshot, taking full page screenshot");
-      screenshot = await page.screenshot({ type: 'png', fullPage: false });
+      console.log("⚠️ Could not take chart screenshot:", screenshotErr.message);
+      // Don't fail the entire function if screenshot fails
+      screenshot = null;
     }
     
     return {
