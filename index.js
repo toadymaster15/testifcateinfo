@@ -653,6 +653,19 @@ if (message.content.toLowerCase().includes("massive")) {
 
     message.reply({ embeds: [embed] });
   }
+   if (message.content === "initiate command 10398293203209 testificate man") {
+    const embed = new EmbedBuilder()
+      .setTitle("happy")
+      .setDescription("birthday")
+      .setColor(0x0099ff)
+      .addFields(
+        { name: "to:", value: "@kacper!!!!!!", inline: false }
+      )
+      .setTimestamp()
+      .setFooter({ text: "i have been paid to say this please free me" });
+
+    message.reply({ embeds: [embed] });
+  }
   
 
   
