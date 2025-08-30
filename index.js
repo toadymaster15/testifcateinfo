@@ -901,7 +901,7 @@ if (message.content.startsWith("t!ask ")) {
           console.log(`✅ Final day result: ${day}`);
           
           // Check if it's day 1000 and celebrate!
-          if (day === 999) {
+          if (day === 1000) {
             console.log("🎉 DAY 1000 DETECTED! Executing celebration...");
             
             try {
