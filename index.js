@@ -796,138 +796,172 @@ if (message.content.startsWith("t!ask ")) {
   }
   // Original t!time command (keeping your existing implementation)
   if (message.content === "t!time") {
-    console.log("🕐 Time command received");
+  console.log("🕐 Time command received");
 
-    // Check if environment variables are set
-    if (!process.env.EXAROTON_SERVER_ID || !process.env.EXAROTON_TOKEN) {
-      console.error("❌ Missing environment variables");
+  // Check if environment variables are set
+  if (!process.env.EXAROTON_SERVER_ID || !process.env.EXAROTON_TOKEN) {
+    console.error("❌ Missing environment variables");
+    return message.reply(
+      "❌ Bot configuration error: Missing server credentials.",
+    );
+  }
+
+  const server = exa.server(process.env.EXAROTON_SERVER_ID);
+
+  try {
+    // First, check server status
+    const serverInfo = await server.get();
+    console.log(`📊 Server status: ${serverInfo.status}`);
+
+    const statusDisplay = getStatusDisplay(serverInfo.status);
+    console.log(`📊 Readable status: ${statusDisplay.name}`);
+
+    if (serverInfo.status !== 1) {
+      // 1 = online
       return message.reply(
-        "❌ Bot configuration error: Missing server credentials.",
+        `⚠️ Server is currently **${statusDisplay.name}**. The server must be online to check the time.`,
       );
     }
 
-    const server = exa.server(process.env.EXAROTON_SERVER_ID);
+    // Generate a unique identifier for this command execution
+    const commandId = Date.now();
+    const uniqueComment = `time-check-${commandId}`;
+    
+    // Execute the time command with a unique comment to identify our request
+    console.log(`⚡ Executing time command with ID: ${commandId}...`);
+    await server.executeCommand(`say Time check ${uniqueComment}`);
+    await server.executeCommand("time query day");
+    console.log("⌛ Commands sent. Waiting for output...");
 
-    try {
-      // First, check server status
-      const serverInfo = await server.get();
-      console.log(`📊 Server status: ${serverInfo.status}`);
+    // Wait for the command to execute and then fetch console output
+    setTimeout(async () => {
+      try {
+        console.log("🔍 Attempting to fetch server logs...");
+        const logs = await server.getLogs();
 
-      const statusDisplay = getStatusDisplay(serverInfo.status);
-      console.log(`📊 Readable status: ${statusDisplay.name}`);
+        console.log("📝 Server logs received");
+        console.log("📊 Logs structure:", {
+          hasContent: !!logs,
+          contentType: typeof logs,
+          contentLength: logs ? logs.length : 0,
+        });
 
-      if (serverInfo.status !== 1) {
-        // 1 = online
-        return message.reply(
-          `⚠️ Server is currently **${statusDisplay.name}**. The server must be online to check the time.`,
-        );
-      }
+        if (!logs || logs.length === 0) {
+          console.log("⚠️ No server logs available");
+          return message.reply(
+            "⚠️ No server logs available. The server might not be generating logs or may need to be restarted.",
+          );
+        }
 
-      // Execute the time command
-      console.log("⚡ Executing time command...");
-      await server.executeCommand("time query day");
-      console.log("⌛ Command sent. Waiting for output...");
+        // Split logs into lines and process from newest to oldest
+        const logLines = logs.split('\n');
+        console.log(`🔍 Processing ${logLines.length} log lines...`);
 
-      // Wait for the command to execute and then fetch console output
-      setTimeout(async () => {
-        try {
-          console.log("🔍 Attempting to fetch server logs...");
-          const logs = await server.getLogs();
-
-          console.log("📝 Server logs received");
-          console.log("📊 Logs structure:", {
-            hasContent: !!logs,
-            contentType: typeof logs,
-            contentLength: logs ? logs.length : 0,
-          });
-
-          if (!logs || logs.length === 0) {
-            console.log("⚠️ No server logs available");
-            return message.reply(
-              "⚠️ No server logs available. The server might not be generating logs or may need to be restarted.",
-            );
-          }
-
-          // Debug: Show recent log content
-          console.log("🔍 Recent log content (last 500 chars):");
-          console.log(logs.slice(-500));
-
-          // Look for time information in the logs
-          const timeMatch = logs.match(/\[.*?\] \[.*?\]: The time is (\d+)/);
-
-          if (timeMatch) {
-            const day = timeMatch[1];
-            console.log(`✅ Found day: ${day}`);
-            message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
-          } else {
-            console.log('⚠️ No "The time is" found in logs');
-
-            // Also try a broader search pattern
-            const broadTimeMatch = logs.match(/The time is (\d+)/);
-            if (broadTimeMatch) {
-              const day = broadTimeMatch[1];
-              console.log(`✅ Found day with broad search: ${day}`);
-              message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
-            } else {
-              // Show what we did find to help debug
-              const recentLogs = logs.split("\n").slice(-10).join("\n");
-              console.log("⚠️ Recent log lines:", recentLogs);
-              message.reply(
-                '⚠️ Could not find "The time is" in server logs. The command may not have executed or the server may be too busy. Try again in a moment.',
-              );
-            }
-          }
-        } catch (logsErr) {
-          console.error("❌ Detailed logs error:", {
-            message: logsErr.message,
-            stack: logsErr.stack,
-            name: logsErr.name,
-          });
-
-          if (logsErr.message.includes("403")) {
-            message.reply(
-              "❌ Permission denied when accessing logs. Check if your API token has log access permissions.",
-            );
-          } else if (logsErr.message.includes("404")) {
-            message.reply(
-              "❌ Server logs not found. The server might not have any logs yet.",
-            );
-          } else if (
-            logsErr.message.includes("loading") ||
-            logsErr.message.includes("stopping") ||
-            logsErr.message.includes("saving")
-          ) {
-            message.reply(
-              "⚠️ Cannot access logs while server is loading, stopping, or saving. Try again when the server is fully online.",
-            );
-          } else {
-            message.reply(
-              `❌ Error retrieving server logs: ${logsErr.message}`,
-            );
+        // Find our unique comment to know when our command was executed
+        let commandTimestamp = null;
+        for (let i = logLines.length - 1; i >= 0; i--) {
+          if (logLines[i].includes(uniqueComment)) {
+            commandTimestamp = i;
+            console.log(`✅ Found our command execution at line ${i}`);
+            break;
           }
         }
-      }, 5000); // Increased timeout to 5 seconds
-    } catch (err) {
-      console.error("❌ Error with server operation:", err.message);
 
-      // Provide more specific error messages
-      if (err.message.includes("404")) {
-        message.reply(
-          "❌ Server not found. Please check the server ID configuration.",
-        );
-      } else if (err.message.includes("403")) {
-        message.reply(
-          "❌ Access denied. Please check the API token permissions.",
-        );
-      } else if (err.message.includes("401")) {
-        message.reply("❌ Authentication failed. Please check the API token.");
-      } else {
-        message.reply(
-          "❌ Failed to retrieve server information. Please try again later.",
-        );
+        // Look for the most recent time information AFTER our command was executed
+        let timeMatch = null;
+        if (commandTimestamp !== null) {
+          // Search from our command timestamp onwards (newer logs)
+          for (let i = commandTimestamp; i < logLines.length; i++) {
+            const match = logLines[i].match(/The time is (\d+)/);
+            if (match) {
+              timeMatch = match;
+              console.log(`✅ Found time at line ${i}: ${match[1]}`);
+              break;
+            }
+          }
+        }
+
+        // Fallback: search the most recent logs if we didn't find our command marker
+        if (!timeMatch) {
+          console.log("⚠️ Command marker not found, searching recent logs...");
+          // Look at the last 50 lines for any time information
+          const recentLines = logLines.slice(-50);
+          for (let i = recentLines.length - 1; i >= 0; i--) {
+            const match = recentLines[i].match(/The time is (\d+)/);
+            if (match) {
+              timeMatch = match;
+              console.log(`✅ Found fallback time: ${match[1]}`);
+              break;
+            }
+          }
+        }
+
+        if (timeMatch) {
+          const day = timeMatch[1];
+          console.log(`✅ Final day result: ${day}`);
+          message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
+        } else {
+          console.log('⚠️ No "The time is" found in logs');
+          
+          // Debug: Show recent log content for troubleshooting
+          const recentLogs = logLines.slice(-10).join("\n");
+          console.log("⚠️ Recent log lines for debugging:", recentLogs);
+          
+          message.reply(
+            '⚠️ Could not find time information in server logs. The time command may not have executed properly. Try again in a moment.',
+          );
+        }
+      } catch (logsErr) {
+        console.error("❌ Detailed logs error:", {
+          message: logsErr.message,
+          stack: logsErr.stack,
+          name: logsErr.name,
+        });
+
+        if (logsErr.message.includes("403")) {
+          message.reply(
+            "❌ Permission denied when accessing logs. Check if your API token has log access permissions.",
+          );
+        } else if (logsErr.message.includes("404")) {
+          message.reply(
+            "❌ Server logs not found. The server might not have any logs yet.",
+          );
+        } else if (
+          logsErr.message.includes("loading") ||
+          logsErr.message.includes("stopping") ||
+          logsErr.message.includes("saving")
+        ) {
+          message.reply(
+            "⚠️ Cannot access logs while server is loading, stopping, or saving. Try again when the server is fully online.",
+          );
+        } else {
+          message.reply(
+            `❌ Error retrieving server logs: ${logsErr.message}`,
+          );
+        }
       }
+    }, 6000); // Increased timeout to 6 seconds to allow more time for command execution
+  } catch (err) {
+    console.error("❌ Error with server operation:", err.message);
+
+    // Provide more specific error messages
+    if (err.message.includes("404")) {
+      message.reply(
+        "❌ Server not found. Please check the server ID configuration.",
+      );
+    } else if (err.message.includes("403")) {
+      message.reply(
+        "❌ Access denied. Please check the API token permissions.",
+      );
+    } else if (err.message.includes("401")) {
+      message.reply("❌ Authentication failed. Please check the API token.");
+    } else {
+      message.reply(
+        "❌ Failed to retrieve server information. Please try again later.",
+      );
     }
   }
+}
 });
 
 // Initialize the bot
