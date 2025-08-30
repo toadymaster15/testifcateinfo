@@ -924,7 +924,7 @@ if (message.content.startsWith("t!ask ")) {
                   { name: "Milestone", value: "1000", inline: true },
                   { name: "apg", value: "massive", inline: false }
                 )
-                .setImage("https://tenor.com/view/minecraft-villager-news-dance-gif-15374212") // Add a celebration GIF if you have one
+                .setImage("https://images-ext-1.discordapp.net/external/wlMQsn12VEYE_CZyb_rsHkXhIv_jmSfzTyRaRmG-87E/https/media.tenor.com/-HtgekCqZt0AAAPo/minecraft-villager.mp4") // Add a celebration GIF if you have one
                 .setTimestamp()
                 .setFooter({ text: "testificate man info 5000" });
               
