@@ -829,7 +829,7 @@ if (message.content.startsWith("t!ask ")) {
     
     // Execute the time command with a unique comment to identify our request
     console.log(`⚡ Executing time command with ID: ${commandId}...`);
-    await server.executeCommand(`say Time check ${uniqueComment}`);
+    await server.executeCommand(`say testificate info checking time.......`);
     await server.executeCommand("time query day");
     console.log("⌛ Commands sent. Waiting for output...");
 
@@ -897,9 +897,47 @@ if (message.content.startsWith("t!ask ")) {
         }
 
         if (timeMatch) {
-          const day = timeMatch[1];
+          const day = parseInt(timeMatch[1]);
           console.log(`✅ Final day result: ${day}`);
-          message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
+          
+          // Check if it's day 1000 and celebrate!
+          if (day === 999) {
+            console.log("🎉 DAY 1000 DETECTED! Executing celebration...");
+            
+            try {
+              // Send big title to all players
+              await server.executeCommand('title @a title {"text":"DAY 1000","color":"gold","bold":true}');
+              await server.executeCommand('title @a subtitle {"text":"massive news GGS","color":"yellow"}');
+              
+              // Send chat message to all players
+              await server.executeCommand('say §6§lWE ARE BACK CHAT DAY 1000');
+              
+              console.log("✅ Day 1000 celebration commands executed!");
+              
+              // Special Discord message for day 1000
+              const celebrationEmbed = new EmbedBuilder()
+                .setTitle("DAY 1000")
+                .setDescription("**APG IS STILL MASSIVE ❗❗❗❗⏰⏰⏰🚨🚨🎆🎆🎉🎉🎉✨**")
+                .setColor(0xffd700)
+                .addFields(
+                  { name: "Dzień na APG", value: `**${day}**`, inline: true },
+                  { name: "Milestone", value: "1000", inline: true },
+                  { name: "apg", value: "massive", inline: false }
+                )
+                .setImage("https://tenor.com/view/minecraft-villager-news-dance-gif-15374212") // Add a celebration GIF if you have one
+                .setTimestamp()
+                .setFooter({ text: "testificate man info 5000" });
+              
+              message.reply({ embeds: [celebrationEmbed] });
+              
+            } catch (celebrationErr) {
+              console.error("❌ Error executing day 1000 celebration:", celebrationErr.message);
+              message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}** 🎉🎉🎉`);
+            }
+          } else {
+            // Normal day response
+            message.reply(`*TESTIFICATE INFO:* Dzień na APG: **${day}**`);
+          }
         } else {
           console.log('⚠️ No "The time is" found in logs');
           
