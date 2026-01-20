@@ -790,7 +790,7 @@ if (message.content.startsWith("t!ask ")) {
       )
       .setColor(0x9932cc)
       .setTimestamp()
-      .setFooter({ text: "TestificateInfo ™ 2025" });
+      .setFooter({ text: "TestificateInfo ™ 2026" });
     
     message.reply({ embeds: [embed] });
   }
