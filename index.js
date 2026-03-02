@@ -241,14 +241,6 @@ async function initializeBot() {
       `🚀 TestificateInfo bot started at ${new Date().toISOString()}`,
     );
 
-    // Set up interval to ping webhook every 5 minutes
-    setInterval(
-      () => {
-        const now = new Date().toISOString();
-        pingWebhook(`🏓 Keep-alive ping - ${now}`);
-      },
-      5 * 60 * 1000,
-    ); // 5 minutes
   } catch (error) {
     console.error("❌ Failed to initialize fetch:", error);
   }
